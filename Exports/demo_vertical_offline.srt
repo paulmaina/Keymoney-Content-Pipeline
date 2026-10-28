@@ -1,0 +1,48 @@
+1
+00:00:00,000 --> 00:00:01,620
+Welcome to your new AI video
+
+2
+00:00:01,620 --> 00:00:02,100
+studio.
+
+3
+00:00:02,600 --> 00:00:04,560
+This video was made entirely from
+
+4
+00:00:04,560 --> 00:00:05,240
+a text script.
+
+5
+00:00:05,840 --> 00:00:07,320
+Each paragraph becomes a scene.
+
+6
+00:00:07,920 --> 00:00:09,220
+You can attach your own footage
+
+7
+00:00:09,220 --> 00:00:11,580
+and short clips loop automatically to
+
+8
+00:00:11,580 --> 00:00:12,240
+fit the narration.
+
+9
+00:00:12,920 --> 00:00:14,920
+Still images get a slow cinematic
+
+10
+00:00:14,920 --> 00:00:15,300
+zoom.
+
+11
+00:00:16,060 --> 00:00:18,760
+Captions are generated automatically and burned
+
+12
+00:00:18,760 --> 00:00:19,960
+into the final export.
+
