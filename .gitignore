@@ -1,2 +1,14 @@
-*.mp4
-models/kokoro-v1.0.onnx
+﻿*.mp4
+!assets/demo/*.mp4
+
+# voice models are large; fetch them with download_models.py
+models/
+
+# secrets and AI image cache
+.env
+generated/
+
+.venv/
+__pycache__/
+.pytest_cache/
+Exports/.work_*/

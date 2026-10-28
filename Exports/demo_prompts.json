@@ -1,0 +1,11 @@
+{
+  "image_model": "@cf/black-forest-labs/flux-1-schnell",
+  "style": "",
+  "scenes": [
+    {
+      "scene": 1,
+      "narration": "Welcome to your new AI video studio. This video was made entirely from a text script.",
+      "prompt": "A young filmmaker stands in a modern studio, surrounded by screens and equipment, soft natural light, shot from a slightly low angle, conveying excitement and creativity."
+    }
+  ]
+}

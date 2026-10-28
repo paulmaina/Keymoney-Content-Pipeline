@@ -1,0 +1,7 @@
+edge-tts>=7.3
+kokoro-onnx>=0.4.7
+soundfile>=0.14
+faster-whisper>=1.2.1
+numpy>=2.0
+Pillow>=11.0
+python-dotenv>=1.0

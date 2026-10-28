@@ -1,0 +1,126 @@
+{
+  "image_model": "@cf/black-forest-labs/flux-1-schnell",
+  "style": "Cinematic documentary style, natural lighting, realistic, respectful depiction of local people",
+  "scenes": [
+    {
+      "scene": 1,
+      "notes": "HOOK - Visuals: clay pot in desert sun, bottle glowing in a tin roof, mist on a net",
+      "narration": "No electricity. No fridge. No running water. Yet these villagers keep food cold, light their homes for free, and pull water out of thin air.",
+      "prompt": "Montage-style still: a large unglazed clay pot standing in bright desert sun beside a mud-brick wall in a dry West African village, heat haze, a plastic water bottle glinting in a corrugated tin roof behind it, low angle, golden afternoon light, sense of quiet ingenuity."
+    },
+    {
+      "scene": 2,
+      "notes": "HOOK - Visuals: giant ice cone in the mountains, bridge made of living tree roots",
+      "narration": "Here are five village hacks so smart that cities are starting to copy them.",
+      "prompt": "A towering cone of ice rising from a snowy Himalayan valley floor at dawn, small stone houses and bare poplar trees below, crisp blue light, wide shot from a low angle, sense of wonder."
+    },
+    {
+      "scene": 3,
+      "notes": "INTRO - Visuals: channel logo, spinning globe with five pins",
+      "narration": "Welcome to Smart Village Boy, where we travel the world's villages to find the clever ideas ordinary people use to make life easier. Stay to the end, because hack number five is literally alive.",
+      "prompt": "A young traveller with a backpack walking along a dirt path into a green hillside village at golden hour, seen from behind, terraced fields and small homes ahead, warm light, wide shot, welcoming and adventurous mood."
+    },
+    {
+      "scene": 4,
+      "notes": "HACK 1 NIGERIA - Visuals: Sahel village market in harsh sun",
+      "narration": "In northern Nigeria, heat can spoil vegetables in just a few days. So a teacher named Mohammed Bah Abba popularised an old idea: the pot-in-pot cooler, or zeer.",
+      "prompt": "A busy open-air market in a northern Nigerian town in harsh midday sun, traders in light cotton kaftans and embroidered caps and women in bright printed wrappers and headscarves, piles of tomatoes and peppers wilting in the heat, medium-wide shot at eye level, warm dusty atmosphere."
+    },
+    {
+      "scene": 5,
+      "notes": "HACK 1 - Visuals: hands placing a small pot inside a larger one, pouring sand, then water",
+      "narration": "Put one clay pot inside a bigger one, fill the gap with wet sand, and cover the top with a damp cloth.",
+      "prompt": "Close-up of a man's hands placing a small clay pot inside a larger clay pot in a shaded courtyard in northern Nigeria, pouring wet sand into the gap between them, damp cloth folded nearby, soft shade with bright sun beyond, overhead three-quarter angle, practical and calm mood."
+    },
+    {
+      "scene": 6,
+      "notes": "HACK 1 - Visuals: heat leaving as vapour, then fresh tomatoes inside the pot",
+      "narration": "As the water evaporates through the outer pot, it pulls heat away, and the inner pot stays much cooler. Tomatoes that would rot in a few days can last for weeks. No electricity, almost no cost.",
+      "prompt": "Close-up of a pot-in-pot clay cooler with a damp cloth folded back, revealing fresh red tomatoes inside, beads of moisture darkening the outer pot, sunlit courtyard in northern Nigeria, eye-level shot, sense of ingenuity."
+    },
+    {
+      "scene": 7,
+      "notes": "HACK 2 BRAZIL / PHILIPPINES - Visuals: a dark tin-roofed room",
+      "narration": "In 2002, Brazilian mechanic Alfredo Moser had a problem: blackouts and dark homes. His fix was a plastic bottle filled with water and a little bleach, pushed through a hole in the roof.",
+      "prompt": "Inside a dark small home in Brazil with a corrugated tin roof, a man in a work shirt standing on a stool pushing a clear plastic bottle of water up through a hole in the roof, a thin shaft of light around it, low angle from below, dim moody light."
+    },
+    {
+      "scene": 8,
+      "notes": "HACK 2 - Visuals: bottle sealed into the roof, the room suddenly lights up",
+      "narration": "Sunlight hits the bottle, the water bends it, and it spreads through the room about as brightly as a 40 to 60 watt bulb.",
+      "prompt": "The same small Brazilian home now lit by a clear water-filled plastic bottle set into the tin roof, glowing bright white like a light bulb, soft light spreading across a table and simple furniture, a family looking up at it, medium-wide shot, warm hopeful mood."
+    },
+    {
+      "scene": 9,
+      "notes": "HACK 2 - Visuals: aerial view of many rooftops glinting",
+      "narration": "The Liter of Light movement later spread the idea to hundreds of thousands of homes, starting in the Philippines.",
+      "prompt": "Aerial view over a dense neighbourhood of corrugated tin rooftops in the Philippines, dozens of clear plastic bottles set into the roofs glinting in tropical midday sun, palm trees between the houses, top-down drone angle, bright and hopeful."
+    },
+    {
+      "scene": 10,
+      "notes": "HACK 3 CHILE - Visuals: fog rolling over dry coastal hills",
+      "narration": "The Atacama in Chile is one of the driest deserts on Earth, yet thick sea fog called camanchaca rolls in from the Pacific.",
+      "prompt": "Thick white sea fog rolling over dry brown coastal hills of the Atacama desert in Chile, the Pacific Ocean faintly visible beyond, soft diffuse grey light, wide aerial shot, quiet and mysterious mood."
+    },
+    {
+      "scene": 11,
+      "notes": "HACK 3 - Visuals: close-up of droplets forming on a net and trickling into a pipe",
+      "narration": "Villagers stretch huge mesh nets across the hills. Tiny fog droplets stick to the mesh, merge, and drip into gutters below.",
+      "prompt": "Macro close-up of a fine black mesh fog net covered in tiny water droplets merging and trickling down into a plastic gutter, misty grey background, soft diffuse light, droplets sharp in the centre of the frame, calm and precise mood."
+    },
+    {
+      "scene": 12,
+      "notes": "HACK 3 - Visuals: a small green garden in the desert",
+      "narration": "Some nets collect hundreds of litres a day, enough to grow vegetables and even brew beer.",
+      "prompt": "A small green vegetable garden thriving on a dry rocky hillside in the Atacama desert, rows of lettuce and herbs fed by a thin pipe, tall fog-catching mesh nets standing on the ridge behind, soft morning light, low angle, hopeful mood."
+    },
+    {
+      "scene": 13,
+      "notes": "HACK 4 LADAKH, INDIA - Visuals: snowy mountain valley",
+      "narration": "High in the Himalayas, farmers in Ladakh run short of water in spring, just when crops need it most. Engineer Sonam Wangchuk came up with the ice stupa.",
+      "prompt": "A wide snowy mountain valley in Ladakh, India, under a clear blue sky, Ladakhi farmers in maroon wool goncha robes and modern jackets walking along a path between stone walls and leafless poplars, high-angle shot, crisp bright daylight, serene atmosphere."
+    },
+    {
+      "scene": 14,
+      "notes": "HACK 4 - Visuals: a pipe spraying a fountain that freezes into a tall ice cone",
+      "narration": "In winter, meltwater is piped downhill and sprayed upward into the freezing air, where it builds a towering cone of ice.",
+      "prompt": "Snowy mountain valley in Ladakh, India, a pipe spraying water into freezing air, forming a tall ice cone, sunny daylight, high-angle shot, serene atmosphere."
+    },
+    {
+      "scene": 15,
+      "notes": "HACK 4 - Visuals: time-lapse of spring melt flowing into green barley fields",
+      "narration": "Because a cone exposes less surface to the sun, it melts slowly and releases water right when the fields need it.",
+      "prompt": "A tall ice cone in a Ladakh valley in spring, partly melted, meltwater streaming down a channel into bright green young barley fields, mountains behind, warm sunlight, low angle, renewal and abundance."
+    },
+    {
+      "scene": 16,
+      "notes": "HACK 5 MEGHALAYA, INDIA - Visuals: misty jungle river",
+      "narration": "And the hack that's alive. In the rainforests of Meghalaya, Khasi villagers guide the roots of rubber fig trees across rivers using hollow betel-nut trunks as guides.",
+      "prompt": "A Khasi man in everyday clothes and a raincoat guiding thin aerial roots of a rubber fig tree along a hollow betel-nut trunk laid across a rocky jungle river in Meghalaya, India, mist and dense green rainforest, soft diffuse light, low angle, patient and serene mood."
+    },
+    {
+      "scene": 17,
+      "notes": "HACK 5 - Visuals: time-lapse of roots stretching across a gorge",
+      "narration": "Over 10 to 15 years or more, the roots thicken and weave into a bridge that can carry dozens of people.",
+      "prompt": "A thick living root bridge woven from rubber fig roots spanning a misty rainforest gorge in Meghalaya, India, moss covering the roots, a stream below, a Khasi woman in a checked jainsem shawl crossing it, soft natural light, low-angle wide shot, timeless atmosphere."
+    },
+    {
+      "scene": 18,
+      "notes": "HACK 5 - Visuals: villagers walking over the double-decker root bridge",
+      "narration": "Unlike wood or steel, it gets stronger as it ages. Some are believed to be centuries old.",
+      "prompt": "The double-decker living root bridge of Meghalaya, India, two levels of woven roots over a clear jungle pool, a group of Khasi villagers and visitors in everyday clothes walking across, lush green rainforest and mist, soft natural light, wide shot from the riverbank, sense of awe."
+    },
+    {
+      "scene": 19,
+      "notes": "OUTRO - Visuals: quick recap montage of all five hacks",
+      "narration": "Five villages, five problems, five brilliant answers, and not one of them needed a big budget. Which hack would you use where you live?",
+      "prompt": "A wide golden-hour view of a hillside village where simple inventions are in everyday use: clay pot coolers on a porch, bottle lights glinting in tin roofs, fog nets on the ridge, neighbours chatting, warm light, wide shot, proud and hopeful mood."
+    },
+    {
+      "scene": 20,
+      "notes": "OUTRO - Visuals: globe zooming out, then a subscribe animation",
+      "narration": "Tell me in the comments, and share a hack from your own village. I might feature it in a future video. Subscribe to Smart Village Boy for more genius from the world's villages.",
+      "prompt": "A glowing Earth seen from space at night with five small points of warm light scattered across Africa, South America, Asia, the camera pulling back into a starry sky, centred globe, inspiring and calm mood."
+    }
+  ]
+}

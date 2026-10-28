@@ -1,8 +1,8 @@
 ﻿# Demo script - each paragraph becomes one scene.
 Welcome to your new AI video studio. This video was made entirely from a text script.
 
-[visual: C:\Users\Kimani\AppData\Local\Temp\claude\K--AI-Video-Editor\eb35387f-ca5a-4cc9-b0d9-21191e5ad376\scratchpad\test_clip.mp4]
+[visual: assets/demo/test_clip.mp4]
 Each paragraph becomes a scene. You can attach your own footage, and short clips loop automatically to fit the narration.
 
-[visual: C:\Users\Kimani\AppData\Local\Temp\claude\K--AI-Video-Editor\eb35387f-ca5a-4cc9-b0d9-21191e5ad376\scratchpad\test_image.png]
+[visual: assets/demo/test_image.png]
 Still images get a slow cinematic zoom. Captions are generated automatically and burned into the final export.

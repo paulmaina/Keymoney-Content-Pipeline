@@ -1,0 +1,1 @@
+python make_video.py Scripts\Script1_voiceover.txt --generate-visuals --voice en-US-AndrewMultilingualNeural --rate +20% --style "Cinematic documentary style, natural lighting, realistic, respectful depiction of local people and traditional dress"
