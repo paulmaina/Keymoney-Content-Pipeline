@@ -36,6 +36,9 @@ API = "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
 POLLINATIONS_API = "https://gen.pollinations.ai/image/{prompt}"
 IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8"
+# writes the YouTube metadata (~65 neurons a video). On Script2 the 3B (~11) and 8B (~17) models kept writing
+# titles the narration contradicts ("collect rainwater" for fog nets); the 70B's were accurate.
+METADATA_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 POLLINATIONS_MODEL = "flux"  # alias for black-forest-labs/flux.1-schnell
 POLLINATIONS_CACHE_ID = "pollinations:flux"
 KAGGLE_CACHE_ID = "kaggle:sdxl"
@@ -276,12 +279,15 @@ class Providers:
             print(f"    prompt writer failed ({e}); using a simple prompt")
             return None
         usage = result.get("usage") or {}
+        response = result.get("response")
+        if isinstance(response, (dict, list)):  # some models' JSON replies arrive already parsed
+            response = json.dumps(response, ensure_ascii=False)
         tin = usage.get("prompt_tokens") or sum(len(m["content"]) for m in messages) / 4
-        tout = usage.get("completion_tokens") or len(str(result.get("response") or "")) / 4
+        tout = usage.get("completion_tokens") or len(str(response or "")) / 4
         rate_in, rate_out = TEXT_NEURONS.get(self.text_model, TEXT_NEURONS[TEXT_MODEL])
         self.neurons += (tin * rate_in + tout * rate_out) / 1e6
         self.counts["text"] += 1
-        return str(result.get("response") or "").strip().strip('"').strip() or None
+        return str(response or "").strip().strip('"').strip() or None
 
     def cache_ids(self):
         return [(self.image_model, "cloudflare"), (POLLINATIONS_CACHE_ID, "pollinations"), (KAGGLE_CACHE_ID, "kaggle")]

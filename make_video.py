@@ -4,6 +4,8 @@ By default both formats are rendered from one narration and one caption track:
   Exports/<name>_horizontal.mp4   1920x1080 for YouTube / Facebook
   Exports/<name>_vertical.mp4     1080x1920 for Instagram Reels / TikTok / Shorts
   Exports/<name>.srt              caption file (same timings for both)
+  Exports/<name>_youtube.md       title options, description with chapters, tags (--no-metadata skips)
+  Exports/<name>_thumbnail.jpg    1280x720 thumbnail
 
 Script format (plain .txt):
   - Each paragraph (separated by a blank line) is one scene.
@@ -129,6 +131,32 @@ def parse_script(path):
             scenes.append({"text": " ".join(lines), "visual": visual, "video": video,
                            "description": "; ".join(described)})
     return scenes
+
+
+# "# HOOK", "# HACK 4 LADAKH, INDIA - Visuals: ...", "# OUTRO:": an all-caps section heading, used for YouTube chapters
+SECTION_LINE = re.compile(r"^#\s*([A-Z][A-Z0-9&'/, ]*?[A-Z0-9])\s*(?:$|[-–—:])")
+NOT_SECTIONS = {"NOTE", "TODO", "FIXME", "TIP"}
+
+
+def parse_sections(path):
+    """Section heading of each scene (parallel to parse_script), or None before the first heading.
+    A heading applies to its own paragraph and every later one until the next heading."""
+    sections, current = [], None
+    for block in re.split(r"\n\s*\n", path.read_text(encoding="utf-8-sig")):
+        spoken = False
+        for line in block.strip().splitlines():
+            line = line.strip()
+            if line.startswith("#"):
+                if ((m := SECTION_LINE.match(line)) and len(m.group(1)) >= 3
+                        and m.group(1).split()[0] not in NOT_SECTIONS):
+                    current = " ".join(m.group(1).split())
+                continue
+            while (m := LEADING_TAG.match(line)):
+                line = line[m.end():]
+            spoken |= bool(line)
+        if spoken:
+            sections.append(current)
+    return sections
 
 
 def parse_comments(path):
@@ -550,6 +578,12 @@ def parse_args(argv=None):
     ap.add_argument("--no-captions", action="store_true")
     ap.add_argument("--whisper-model", default="base", help="tiny/base/small/medium")
     ap.add_argument("--caption-words", type=int, default=6, help="max words per caption line")
+    ap.add_argument("--no-metadata", action="store_true",
+                    help="don't write Exports/<name>_youtube.md (titles, description, chapters, tags) "
+                         "and <name>_thumbnail.jpg after rendering")
+    ap.add_argument("--metadata-model", default=ai_visuals.METADATA_MODEL,
+                    help="Workers AI model that writes the YouTube titles, description and tags (~65 neurons)")
+    ap.add_argument("--channel", default="Smart Village Boy", help="channel name used in the YouTube metadata")
     ap.add_argument("--keep-work", action="store_true", help="keep intermediate files")
     ap.add_argument("--check", action="store_true",
                     help="check the script and estimate length, Cloudflare neurons and Kaggle GPU time, then stop "
@@ -652,6 +686,15 @@ def main():
     outs = [render_format(fmt, scenes, work, narration, srt, font_path, args,
                           base.with_name(f"{base.name}_{fmt}.mp4")) for fmt in formats]
 
+    meta = None
+    if not args.no_metadata:
+        import youtube_meta
+        try:
+            meta = youtube_meta.write(scenes, script, base, args, work, duration(narration))
+        except Exception as e:  # the videos are done; never lose them over the upload notes
+            print(f"YouTube metadata failed ({e.__class__.__name__}: {e}); the videos are fine. "
+                  "Rerun with --no-metadata to skip it.")
+
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     print("Done:")
@@ -659,6 +702,8 @@ def main():
         print(f"  {out} ({duration(out):.1f}s)")
     if srt:
         print(f"  {base.with_name(base.name + '.srt')}")
+    for path in meta or []:
+        print(f"  {path}")
     if failed_visuals:
         print(f"Image generation failed for scene(s) {', '.join(map(str, failed_visuals))}; "
               "they use title cards. Rerun later to retry (successful images are cached).")

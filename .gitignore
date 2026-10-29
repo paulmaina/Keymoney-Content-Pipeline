@@ -16,3 +16,6 @@ Exports/.clips_*/
 Exports/*_video_job/
 Exports/*_video_job.zip
 Exports/*_kaggle/
+
+# research.py transcripts: other creators' words, for analysis only
+Research/_raw/
