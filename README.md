@@ -10,7 +10,9 @@ Turn a text script into narrated, captioned videos ready for social media. One r
 | `Exports/<name>_youtube.md` | | Title options, description with chapters, and tags ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
 | `Exports/<name>_thumbnail.jpg` | 1280x720 | YouTube thumbnail with 2–4 words of bold text |
 
-The voice over and captions are generated once and shared by both videos.
+The voice over and captions are generated once and shared by both videos. By default the videos are rendered with
+[Remotion](#motion-with-remotion-default): eased pans and zooms with a subtle 2.5D parallax, crossfades, animated captions,
+place labels, a world map with a pin for each new country, and a short branded intro and outro. Everything runs locally and free.
 
 ## Setup
 1. Install **FFmpeg** and make sure `ffmpeg` and `ffprobe` are on your PATH
@@ -27,6 +29,10 @@ The voice over and captions are generated once and shared by both videos.
    The first run also downloads the Whisper caption model (~140 MB) automatically.
 
 4. Optional, for AI-generated scene images (`--generate-visuals`): see [AI-generated visuals](#ai-generated-visuals).
+
+5. For the default Remotion renderer, install **Node.js** (`winget install OpenJS.NodeJS.LTS`, then open a new terminal).
+   The first render installs Remotion's packages into `remotion/node_modules` (~250 MB) and the depth model for parallax
+   into `models/` (99 MB), once each. Without Node.js, videos are rendered with plain FFmpeg instead.
 
 For hand editing, [Shotcut](https://shotcut.org) (`winget install Meltytech.Shotcut`) works well with the exported MP4s and `.srt`.
 
@@ -45,53 +51,44 @@ Grandpa Kofi watches from the riverbank. He smiles and waves his stick.
 [visual: market.jpg] The market is busy today. Everyone has come to see the bridge.
 ```
 
-- **`[video]`** at the start of a paragraph, on the same line as the narration or on its own line, makes that scene an AI video clip
-  (see [AI video clips](#ai-video-clips-kaggle)). Aim for 4–5 action scenes.
+- **`[video]`** at the start of a paragraph, on the same line as the narration or on its own line, marks an action scene: its
+  picture gets a stronger camera move (more zoom and travel). Aim for 4–5 action scenes.
 - **`[visual: file]`** at the start of a paragraph uses your own footage or image, from `Raw Footage/` or next to the script.
-  A scene with `[visual:]` is never animated. Missing files are reported before any audio is made.
+  Missing files are reported before any audio is made.
 - **Tags are never spoken or captioned.** They're recognised only at the start of a line, in any upper or lower case, and both can be combined:
   `[video] [visual: x.png] Text`. A bracket anywhere else stays in the narration, and `--check` flags it.
 - **`# character: Name = description`** lines (also `Name: description` or `Name - description`) declare a character sheet
   for consistent AI images (see [Character consistency](#character-consistency)). They aren't spoken.
 - **`#` description lines** inside a paragraph, labelled `Visuals:`, `Visual:`, `Shot:` or `Description:`
   (e.g. `# HACK 1 NIGERIA - Visuals: hands placing a small pot inside a larger one`), say what that scene should show.
-  They're never spoken or captioned, but they're the main input to the scene's **image prompt** and, for `[video]` scenes,
-  its **motion prompt**. If a description is added or edited, that scene's saved prompt is written again.
+  They're never spoken or captioned, but they're the main input to the scene's **image prompt**. If a description is added or
+  edited, that scene's saved prompt is written again.
 - **Every other line starting with `#` is a comment**, wherever it is (above, inside or between paragraphs, indented or not).
   Comments are never spoken, captioned or used in AI prompts. `--check` lists the comments it skipped.
 - Without `--generate-visuals`, scenes with no `[visual:]` use the files in `Raw Footage/` in alphabetical order, or a text card if it's empty.
-- Short clips loop to fill their scene, and still images get a slow zoom.
+- Your own video clips loop to fill their scene with `--renderer ffmpeg`; the Remotion renderer moves a still frame from them.
 - Captions use your script's spelling (names, brands), with timings taken from the narration.
 
 ### Check a script before rendering
 ```
 .venv\Scripts\python make_video.py Scripts\my_video.txt --check
 ```
-`--check` reports scene count, words and estimated seconds per scene (from the voice engine and `--rate`), which scenes are video,
-which use your own files, and every `#` comment line it skipped. It flags:
+`--check` reports scene count, words and estimated seconds per scene (from the voice engine and `--rate`), which scenes get an AI
+image, a stronger move (`[video]`) or your own file, and every `#` comment line it skipped. It flags:
 - a `# character:` line without `=`, `:` or ` - ` between name and description (it would be skipped as a comment);
 - paragraphs over 60 words, or with more than 3 sentences once they pass 40 words;
 - missing `[visual:]` files;
-- more than 6 video scenes;
-- scenes with both `[video]` and `[visual:]`;
 - stray `[tags]` that would be spoken.
 
-It also estimates Cloudflare neurons and Kaggle GPU time, counting saved prompts and cached images as free. It uses no network,
-audio or FFmpeg, and changes nothing.
-
-### One command for everything
-```
-.venv\Scripts\python make_video.py Scripts\my_video.txt --kaggle-video
-```
-`[video]` scenes become Kaggle clips, every other scene without `[visual:]` gets an AI image, and both final videos are rendered
-locally. With no `[video]` scenes it skips Kaggle and just makes the images. Run `--check` first: it lists which scenes will be video,
-image or your own file.
+It also estimates Cloudflare neurons (counting saved prompts and cached images as free, and warning past the free 10,000 a day),
+Kaggle GPU time for `--upscale`, and the render time. It uses no network, audio or FFmpeg, and changes nothing. Add the options you'll
+render with (`--generate-visuals --new-images --upscale`) to see their cost.
 
 ### Your defaults (`make_video.toml`)
 Options you always use go in `make_video.toml` in the project folder, written like the command-line option without the dashes:
 ```toml
 [defaults]
-style = "3D animated film style, colourful, expressive characters"
+style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
 voice = "en-US-EmmaMultilingualNeural"
 rate = "+5%"
 ```
@@ -106,6 +103,9 @@ Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the f
 | Option | What it does |
 |---|---|
 | `--format horizontal` / `vertical` / `both` | Which videos to render (default `both`) |
+| `--renderer ffmpeg` | Plain FFmpeg rendering: one slow zoom per image, burned-in captions, no intro. Much faster (default `remotion`) |
+| `--no-branding` | Remotion: leave out the channel intro and outro |
+| `--no-parallax` | Remotion: plain pans and zooms only (skips the depth model) |
 | `-o Exports\promo` | Base name for outputs, giving `promo_horizontal.mp4`, `promo_vertical.mp4` and `promo.srt` |
 | `--engine kokoro` | Offline voice instead of Microsoft's online voices |
 | `--voice en-US-GuyNeural` | Choose a voice (defaults: `en-US-AriaNeural` online, `af_heart` offline) |
@@ -118,17 +118,11 @@ Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the f
 | `--prompts-only` | Write the AI image prompts for review, then stop (no images, audio or video) |
 | `--regenerate` | Ignore cached AI images and saved prompts for this run (your edited prompts are rewritten) |
 | `--new-images` | Keep the saved prompts but draw every image again; the new ones replace the cached ones |
-| `--image-provider auto` | Where AI images come from: `auto` (default), `cloudflare`, `pollinations` or `kaggle` (see below) |
-| `--image-model @cf/...` | A different Workers AI image model (default `@cf/black-forest-labs/flux-1-schnell`) |
-| `--text-model @cf/...` | A different Workers AI model for writing prompts (default `@cf/meta/llama-3.1-8b-instruct-fp8`) |
-| `--video-scenes "3,7,12"` | Scenes to make into AI video clips, the same as a `[video]` line |
-| `--export-video-job` | Write `Exports/<name>_video_job.zip` for the Kaggle notebook, then stop |
-| `--clips clips.zip` | Use the clips (and any images) downloaded from the Kaggle notebook |
-| `--clip-fill pingpong` | How a short clip fills a longer scene: `pingpong` (default), `slowmo` or `freeze` |
-| `--kaggle-video` | Do the whole Kaggle step automatically: export, upload, run on a private GPU kernel, download, render |
-| `--kaggle-resume` | Continue an interrupted `--kaggle-video` run without redoing finished clips |
-| `--kaggle-hours 3` | Hard time limit for each Kaggle run (default about 45 min plus 1 h per clip, at most 12) |
-| `--check` | Check the script and estimate length, neurons and GPU time, then stop |
+| `--image-provider auto` | Where AI images come from: `auto` (default), `cloudflare` or `pollinations` (see below) |
+| `--image-model flux-2-klein-4b` | The Workers AI image model, by short name or `@cf/...` ID (see [Image models](#image-models)) |
+| `--text-model @cf/...` | A different Workers AI model for writing prompts (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) |
+| `--upscale` | Sharpen scene images under 2048 px with Real-ESRGAN on a free Kaggle GPU (see [Upscaling](#upscaling-on-kaggle---upscale)) |
+| `--check` | Check the script and estimate length, neurons, GPU time and render time, then stop |
 | `--no-captions` | Don't burn in captions (the `.srt` is still useful for YouTube's caption upload) |
 | `--whisper-model small` | More accurate caption timing, but slower |
 | `--caption-words 4` | Fewer words per caption line |
@@ -147,12 +141,40 @@ Examples:
 Voices: run `.venv\Scripts\edge-tts --list-voices` for the online ones (e.g. `en-US-AndrewNeural`, `en-GB-SoniaNeural`).
 Offline Kokoro voices include `af_heart`, `af_bella`, `am_michael`, `bf_emma` and `bm_george`.
 
+### Motion with Remotion (default)
+`remotion_render.py` plans every frame in Python and hands it to the small React project in `remotion/`, which Remotion renders in
+headless Chrome on your PC. The voice and music are then mixed by FFmpeg exactly as with `--renderer ffmpeg`.
+- **Image scenes** get a slow pan, tilt, zoom or push with eased motion, varied through the video and never the same move twice
+  in a row. Offsets are limited so the picture's edge never shows. `[video]` scenes get a stronger move. Each format uses its own
+  16:9 or 9:16 image when the image model drew one.
+- **2.5D parallax**: the [Depth Anything V2 Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) model (Apache-2.0, CPU,
+  ~1 s per image) finds what's near the camera, and that layer drifts a little more than the background. It's used only when an
+  image has a clear subject standing in front of a backdrop (in Script2: the market vendor, the two farmers, the globe's pins), not on
+  walls, aerial views or close-ups, where it would wobble. Masks are cached next to the images.
+- **Crossfades** between scenes, centred on the moment the narration moves on.
+- **Captions** pop in line by line, with the spoken word in yellow. The `.srt` is still written (shifted to match the intro).
+- **Place labels** ("Northern Nigeria", "Ladakh, India") when the narration reaches a new place, and a **world map** that flies to
+  each new country and drops a pin, with a dotted line from the last one. Places come from the narration only: country names,
+  directions ("northern Nigeria"), known regions (Ladakh, Meghalaya, Atacama, ...), or a name the `# Visuals:` line places
+  ("Tharu, Nepal"). Add `# location: Nakuru, Kenya` to a scene to set it, or `# location: none` to stop a label.
+- **Branding**: a 2-second intro (rising sun, channel name, tagline) and a 3.5-second "Thanks for watching / Subscribe" outro,
+  in the channel's red, yellow and night blue. `--no-branding` leaves them out. YouTube chapters account for the intro.
+
+**Render time.** Before rendering, the run prints an estimate from the speed it measured last time on your PC (`--check` shows it
+too). On an Intel i7-1355U laptop with integrated graphics and 16 GB RAM, Script2 (2:37, 19 scenes) took 286 s to render
+horizontally and 336 s vertically, about 15 frames a second with 6 in parallel. The whole run was 12 minutes, against 6.5 minutes with
+`--renderer ffmpeg`. `--format vertical` or `horizontal` saves about half the render time when you only need one.
+
+Preview or tweak the design with `npx remotion studio` in `remotion/` (the colours are in `remotion/src/theme.ts`). Remotion is free
+for individuals and small companies; see [remotion.dev/license](https://www.remotion.dev/license).
+
 ### YouTube metadata and thumbnail
 After rendering, two upload helpers are written next to the videos (`--no-metadata` skips them):
 - **`Exports/<name>_youtube.md`**: 3 curiosity-driven title options under 60 characters (no clickbait), a ready-to-paste description (hook, short summary,
   chapters, a line saying whether the visuals are AI-generated, hashtags), the chapters on their own, and 10–15 tags.
 - **`Exports/<name>_thumbnail.jpg`**: 1280x720, under 2 MB, with 2–4 words of bold text in the bundled font, on the most colourful
-  and contrasty scene picture. If every scene is a title card it draws one FLUX image (57.6 neurons, cached), or uses a plain gradient.
+  and contrasty scene picture (its 16:9 image). If every scene is a title card it draws one AI image (about 132 neurons, cached), or
+  uses a plain gradient.
 
 **Chapters** come from the real scene timings, grouped by all-caps section headings in the script. A heading applies to its
 paragraph and the following ones until the next heading, and `HACK 1 NIGERIA` and `HACK 1` count as the same chapter:
@@ -197,26 +219,49 @@ Two Claude Code skills in `.claude/skills/` help before you write and before you
 `--generate-visuals` draws an image for every scene that has no `[visual:]` line. Scenes with a `[visual:]` line always keep your file.
 With this option, `Raw Footage/` is **not** used to fill the other scenes.
 
+```
+.venv\Scripts\python make_video.py Scripts\my_video.txt --generate-visuals
+```
+
 `--image-provider` picks where images come from:
 
 | Provider | What it uses | Needs |
 |---|---|---|
 | `auto` (default) | Cloudflare first. If Cloudflare's daily allowance runs out, it stops calling Cloudflare and uses Pollinations for the rest of the run. If both fail, the scene gets a title card | Cloudflare credentials and/or a Pollinations key |
-| `cloudflare` | FLUX.1 schnell on [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) | Cloudflare credentials |
+| `cloudflare` | The `--image-model` on [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) | Cloudflare credentials |
 | `pollinations` | FLUX.1 schnell on [Pollinations](https://pollinations.ai) | `POLLINATIONS_API_KEY` |
-| `kaggle` | SDXL in the Kaggle notebook. Nothing is generated online: export a job, run the notebook, and import with `--clips` | A Kaggle account |
 
-All providers make square 1024x1024 images and share the `generated/` cache. A cached image from any provider is reused, and the log shows
-which provider made each image (also recorded in `prompts.json`). Prompts are written by Cloudflare's text model whenever Cloudflare credentials
-are set, whatever the image provider. Without them, or after the daily allowance runs out, a simple prompt is built from the scene text.
+Providers share the `generated/` cache. A cached image from any provider is reused, and the log shows which provider made each image
+(also recorded in `prompts.json`). Prompts are written by Cloudflare's text model whenever Cloudflare credentials are set, whatever the
+image provider. Without them, or after the daily allowance runs out, a simple prompt is built from the scene text.
 
 **Pollinations setup:** create a free secret key (it starts with `sk_`) at [enter.pollinations.ai](https://enter.pollinations.ai) and add
 `POLLINATIONS_API_KEY=...` to `.env`. Its FLUX model costs 0.002 "pollen" per image from the free allowance. The current API requires a key. Its
 docs no longer mention the old `nologo` option or a watermark, so check the first few images it makes.
 
-```
-.venv\Scripts\python make_video.py Scripts\my_video.txt --generate-visuals --style "cinematic documentary, natural light"
-```
+### Image models
+Workers AI's text-to-image models (pricing page checked October 2026). Costs are for one 1536x864 image, from the published
+per-tile and per-step rates; a video needs two per scene (16:9 and 9:16), so ~38 images for Script2. The realism notes for klein 4B
+and schnell come from renders here; the others are from the model descriptions, since one video of them would cost days of allowance.
+
+| `--image-model` | Sizes | Neurons per image | Realism | A 19-scene video |
+|---|---|---|---|---|
+| **`flux-2-klein-4b`** (default) | any, 256–1920 px | **~132** (26.05 per 512x512 tile, 4 fixed steps) | Real skin, fabric, light and materials; reads as a photograph | **~5,000** |
+| `flux-2-klein-9b` | any, 256–1920 px | ~1,410 (1,363.64 for the first megapixel) | Sharper detail than 4B | ~54,000 (7 images a day) |
+| `flux-2-dev` | any, 256–1920 px | ~3,800 at 20 steps (37.5 per tile per step) | The most photographic | ~144,000 |
+| `phoenix-1.0` (Leonardo) | any, up to 2048 px | ~2,930 at 25 steps | Strong prompt adherence, polished | ~111,000 |
+| `lucid-origin` (Leonardo) | any, up to 2500 px | ~3,460 at 20 steps | Polished, often stylised | ~131,000 |
+| `flux-1-schnell` | square 1024 only | 57.6 | Plastic skin, illustrated feel; cropped to each format | ~1,100 (19 squares) |
+
+**FLUX.2 [klein] 4B is the recommendation**: it's the only realistic model whose full video fits the free 10,000 neurons a day
+(about 5,000 for the images, ~750 for the prompts and ~70 for the metadata on Script2), and it takes a real width and height. The
+others would need several days' allowance per video. Older SD-based models (`stable-diffusion-xl-*`, `dreamshaper-8-lcm`) are still
+listed by Workers AI, but they're marked beta and are older Stable Diffusion models; they weren't tried here.
+
+**Real 16:9 and 9:16 images.** Models that take a size draw **1536x864** for the horizontal video and **864x1536** for the vertical one,
+each with a composition note for its shape, so the vertical video is no longer a narrow crop of a square. The renderers scale them to
+1080p (add `--upscale` to sharpen them first). FLUX.1 schnell's Workers AI API has no size setting, so it still makes one square per
+scene, cropped to both formats. `--format horizontal` or `vertical` draws only that shape and halves the image cost.
 
 ### One-time Cloudflare setup
 1. Create a free account at [dash.cloudflare.com](https://dash.cloudflare.com).
@@ -227,20 +272,26 @@ docs no longer mention the old `nologo` option or a watermark, so check the firs
    You can set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as environment variables instead.
 
 ### How it works
-1. **Prompts.** A small text model (`@cf/meta/llama-3.1-8b-instruct-fp8`) turns each scene's narration into an image prompt
-   describing the subject, setting, lighting, camera angle and mood. It is told to leave out text, logos, watermarks and real people's names.
-   The previous scene's prompt is passed along so visuals flow from one scene to the next. If the text model fails, a simple prompt is built from the scene text.
-2. **Images.** FLUX.1 schnell (`@cf/black-forest-labs/flux-1-schnell`) draws each image. Its Workers AI API has no width or height setting,
-   so it makes **one square image per scene**. The normal crop fits it to both 16:9 and 9:16, and the prompt asks for a centred subject so
-   it survives both crops. Expect some loss at the edges, especially in the vertical video.
-3. **Cache.** Images are saved in `generated/`, named by a hash of the prompt, size and model. Reruns reuse them and don't spend your quota.
+1. **Prompts.** `@cf/meta/llama-3.3-70b-instruct-fp8-fast` turns each scene's narration into an image prompt describing the shot,
+   lens, light, setting and mood (about 40–50 neurons a scene). On Script2 the cheaper 8B model put the channel's boy into Sonam
+   Wangchuk's scene and called Alfredo Moser Nigerian; the 70B didn't. It is told to leave out text, logos and watermarks, and to
+   show only the people this scene calls for. The previous scene's prompt is passed along for continuity of place and light. If the
+   text model fails, a simple prompt is built from the scene text.
+2. **No names in images.** Before a prompt goes to the image model, every character's name is swapped for their role ("a Ladakhi
+   engineer in his late fifties", "a village boy") and their sheet description is added. Image models don't know who people are,
+   may letter a name into the picture, and real people's names shouldn't be sent to them. A real person is drawn as a representative
+   figure, not as their likeness.
+3. **Images.** The image model draws each scene, once per format for a sized model (see [Image models](#image-models)).
+   `--new-images` sends a fresh random seed.
+4. **Cache.** Images are saved in `generated/`, named by a hash of the prompt, size and model. Reruns reuse them and don't spend your quota.
    `--regenerate` forces new prompts and images.
-4. **Failures.** Network errors and rate limits are retried 3 times. A scene that still fails gets a title card, and the run carries on;
-   failed scenes are listed at the end. Rerun later to fill them in, since images that did succeed are cached.
+5. **Failures.** Network errors and rate limits are retried 3 times. If one shape fails, the other is cropped to fit. A scene that still
+   fails gets a title card, and the run carries on; failed scenes are listed at the end. Rerun later to fill them in, since images that
+   did succeed are cached.
 
 ### Reviewing and editing prompts
 The prompt writer sees each scene's `Visuals:` description line (which decides what the image shows), its narration, the style,
-the character sheet and the previous scene's prompt. Plain `#` comments are never sent. To steer a shot, edit its description
+the characters this scene names and the previous scene's prompt. Plain `#` comments are never sent. To steer a shot, edit its description
 line in the script, or its prompt in `prompts.json`. Review the prompts before spending image quota:
 ```
 .venv\Scripts\python make_video.py Scripts\my_video.txt --prompts-only
@@ -251,152 +302,84 @@ again with `--generate-visuals` and the same `-o`.
 
 Prompts are saved to `Exports/<name>_prompts.json`:
 ```json
-{"scenes": [{"scene": 4, "narration": "In northern Nigeria, heat can...", "prompt": "A busy market in a dry Sahel village..."}]}
+{"style": "photorealistic ...", "scenes": [{"scene": 4, "narration": "In northern Nigeria, heat can...", "prompt": "Medium shot, 50mm lens..."}]}
 ```
 Edit any `"prompt"` and rerun the same command. Your edited prompts are reused instead of being rewritten, and only scenes whose prompt changed get new images.
-Prompts are matched to scenes by their narration, so if you change a scene's narration, that scene gets a fresh prompt. `--style` is added when the
-image is made, not stored in the file, so changing the style regenerates the images but keeps your prompts.
+Prompts are matched to scenes by their narration, so if you change a scene's narration, that scene gets a fresh prompt. Prompts are
+written for a style (a photograph is described differently from an animation), so when the style changes, every prompt and every
+learned character description is written again; your `# character:` lines are kept.
 
 ### Character consistency
 Image models draw each scene separately, so the same character can look different from scene to scene. To keep them consistent:
-1. **Declare them** with `# character: Name = description` lines in the script: age, build, hair, clothing and colours.
-2. Every image prompt gets the **character sheet**, and the prompt writer is told to describe those characters exactly as listed.
-3. The prompt writer also lists the recurring characters it drew. A character described for the first time is **added to the sheet**
-   and used in every later scene. Existing entries never change, and your declarations always win.
-4. When a scene's narration names a character, using any distinctive word of the name ("Kofi" or "Grandpa" for "Grandpa Kofi"), their
-   description is **added to that scene's image prompt** if the prompt doesn't already contain it. Only the description is added,
-   never the name, so real people's names stay out of images.
+1. **Declare them** with `# character: Name = description` lines in the script: age, origin, build, hair, clothing and colours.
+   Do this for real people the script names (Script2 declares Sonam Wangchuk), so they're drawn as described rather than guessed.
+2. When a scene's narration or `Visuals:` line names a character, using any distinctive word of the name ("Kofi" or "Grandpa" for
+   "Grandpa Kofi"; role words like "villagers" or "farmer" don't count), the prompt writer gets their sheet entry and is told to
+   describe them exactly as listed. Characters the scene doesn't name aren't shown to it.
+3. The prompt writer also lists the recurring characters it drew. A character named in the scene's text and described for the first
+   time is **added to the sheet**; roles ("Villagers", "Farmer 1") aren't. Existing entries never change, and your declarations win.
+4. That scene's image prompt gets the description, with the name swapped for a role.
 
 The sheet is saved under `"characters"` in `Exports/<name>_prompts.json`; edit it there like the prompts. Image models still vary a little,
 so keep descriptions short, concrete and identical across scenes: "yellow dress, red sandals", not "brightly dressed".
 
 ### Style
 The style (from `--style`, `make_video.toml` or `VIDEO_STYLE`) is added to every image prompt, and it's also given to the prompt writer.
-So with an animated style, prompts are written for animation rather than as photographs.
+The default is photorealistic documentary photography, so prompts are written as real photographs (shot type, lens, natural light,
+real textures); with an animated style they're written for animation instead.
 
 ### Free allowance
 Workers AI's free plan includes **10,000 neurons per day**. Cloudflare can change this, so check the
 [pricing page](https://developers.cloudflare.com/workers-ai/platform/pricing/).
-At the published rates, a 1024x1024 FLUX.1 schnell image at 4 steps costs **57.6 neurons**, and each prompt from the 8B text model about **5–7 neurons**.
-That makes a 20-scene video roughly 1,300 neurons the first time, and almost nothing on cached reruns. Each run prints its estimated usage.
-Past the free allowance, Cloudflare refuses requests until the next day. With `--image-provider auto` the run switches to Pollinations if you have a
-key; otherwise those scenes get title cards.
+At the published rates, a first full render of Script2 (19 scenes, both formats) costs about **5,000 neurons** of FLUX.2 klein
+images, **~650–750** for the 70B prompts and **~70** for the YouTube metadata. Cached reruns cost almost nothing. Each run prints its
+estimated usage, and `--check` shows it beforehand. Past the free allowance, Cloudflare refuses requests until the next day. With
+`--image-provider auto` the run switches to Pollinations if you have a key; otherwise those scenes get title cards.
 
-AI images of realistic scenes may need to be labelled as synthetic content on some platforms, for example YouTube's "altered or synthetic content" setting.
+Realistic AI images need to be labelled as synthetic content on YouTube ("altered or synthetic content"), especially when they show
+a real person or place. The YouTube notes say so.
 
-## AI video clips (Kaggle)
-Selected scenes can become short AI video clips, made with **Wan 2.2** on a free Kaggle GPU (2x T4). The clip starts from the scene's image,
-so it matches the stills around it. Everything else stays the same.
-
-### One command (recommended)
+## Upscaling on Kaggle (`--upscale`)
 ```
-.venv\Scripts\python make_video.py Scripts\my_video.txt --kaggle-video --style "..."
+.venv\Scripts\python make_video.py Scripts\my_video.txt --generate-visuals --upscale
 ```
-This uses the official Kaggle CLI, so you never open the Kaggle website:
-1. Exports the job, as `--export-video-job` does.
-2. Creates a **private** dataset with the job files, or adds a new version to the one already made for this job. A dataset you uploaded by hand
-   as `<name>_job` / `<name>-job` is reused, so no duplicates are left. Old versions are deleted.
-3. Pushes `kaggle/wan_video.ipynb` as a **private** kernel (`<name>-wan-video`) with **GPU T4 x2** and **internet** on, and the dataset attached.
-4. Checks the run **every minute**, printing its status, the elapsed time and the notebook's latest progress line,
-   streamed live with `kaggle kernels logs -f` (e.g. "encoded 1 prompt(s) on cuda:1…", "scene 1 clip by Wan2.2-TI2V-5B…", or a FALLBACK notice).
-5. Downloads the outputs, merges them into `Exports/<name>_kaggle/collected/`, and imports them exactly like `--clips`.
-6. Renders the horizontal and vertical videos, and prints the GPU time used.
+Every scene image under 2048 px on its long side goes to a free Kaggle GPU **in one batch**, is enlarged with **Real-ESRGAN**, and
+the sharper images are used in the render (and the thumbnail). Images are enlarged 2x with RealESRGAN_x2plus (1536x864 becomes
+3072x1728), or 4x with RealESRGAN_x4plus if 2x would still be under 2048 px.
 
-**Setup, once:** on Kaggle, go to **Settings > API Tokens > Generate New Token** and add `KAGGLE_API_TOKEN=...` to `.env`. This is the new-style
-token, not the legacy `kaggle.json`. The token is only given to the Kaggle CLI through its environment; it's never printed, logged or written to a file.
-Kaggle may ask you to verify your phone number before kernels can use GPUs and the internet.
-
-**Saving GPU hours:** Kaggle batch runs stop by themselves when the notebook ends, and every run also gets a hard time limit (`--kaggle-hours`),
-so a stuck run can't use up the ~30 free GPU hours a week. The GPU time printed at the end comes from the session's own log timestamps,
-which is what Kaggle counts, so it stays right even if your PC slept while watching. The same summary lists which model made each clip, its size,
-its time and its peak GPU memory.
-Pressing Ctrl+C stops *watching*, not the run; the CLI has no command to cancel a run.
-
-**Failures and resuming:** if a run fails or hits its time limit, the end of the Kaggle log is printed, and any clips that finished are kept in
-`Exports/<name>_kaggle/collected/`. Run the same command with `--kaggle-resume`:
-- If the previous run is still going, it waits for it.
-- Otherwise it uploads the finished clips with the job, so the notebook skips them, and runs only what's missing.
-- If every clip is already there, it goes straight to rendering.
-
-You can also render with the clips you have: `--clips Exports\<name>_kaggle\collected`.
-
-### Step by step (manual)
-1. **Mark scenes.** Add a `[video]` line to each scene you want animated, or pass `--video-scenes "3,7,12"`. Pick a few key moments,
-   since each clip takes a long time to make on a T4 (see timing below).
-2. **Export the job:**
-   ```
-   .venv\Scripts\python make_video.py Scripts\my_video.txt --export-video-job --style "..."
-   ```
-   This makes (or reuses from the cache) each marked scene's image, writes a **motion prompt** for it (e.g. "slow push-in, leaves moving in the wind"),
-   and creates `Exports/my_video_video_job.zip`. To change a motion, edit `"motion_prompt"` in `Exports/my_video_video_job/job.json` and export again;
-   your edits are kept, as with `prompts.json`. Use the same `--style` you'll render with, so the images match.
-3. **Upload the zip to Kaggle as a dataset:** [kaggle.com](https://www.kaggle.com), then **Create > New Dataset**, upload the zip, and name it, e.g. `my-video-job`.
-   Kaggle unpacks it. Upload a new version of the dataset whenever you re-export.
-4. **Open the notebook:** **Create > New Notebook**, then **File > Import Notebook** and choose `kaggle/wan_video.ipynb`.
-5. **Settings** (right-hand panel): **Accelerator: GPU T4 x2**, **Internet: On**, and **Add Input** the dataset from step 3.
-   Kaggle may ask you to verify your phone number before it enables GPUs and Internet.
-6. **Run All.** The first run downloads the models (about 30–40 GB). The notebook prints the time per clip and the estimated time remaining.
-7. **Download `clips.zip`** from the notebook's **Output** tab (`/kaggle/working/clips.zip`).
-8. **Stop the session** (power icon, top right). Kaggle gives about **30 free GPU hours a week**, and an idle session still uses them.
-9. **Render:**
-   ```
-   .venv\Scripts\python make_video.py Scripts\my_video.txt --generate-visuals --clips clips.zip --style "..."
-   ```
-   Clips are matched to scenes by their narration (falling back to scene number), using the notebook's `manifest.json`. Scenes without a clip
-   keep their still image with the slow zoom. Cached images mean this spends no image quota.
-
-If a Kaggle session times out, start it again and Run All. Clips already made are skipped, and `clips.zip` is rebuilt after every clip.
-
-### Models, sizes and timing
-- **Wan 2.2 TI2V-5B**, image to video: **960x544** by default (`--kaggle-size 1280x704` for full 720p), 121 frames at 24 fps (about 5 s),
-  30 steps (the model card uses 50). T4s have no bf16, so it runs in fp16, with the VAE in fp32 and VAE tiling on. To fit a 15 GB T4:
-  - The 11 GB text encoder encodes every clip's prompt once on the second T4, then it's freed.
-  - The video model uses diffusers' **leaf-level group offloading** with CUDA streams: weights stay in CPU RAM, and only the layers
-    being computed are on the GPU.
-- **Fallback: Wan 2.1 T2V-1.3B**, text to video, 832x480, 81 frames at 16 fps. It's used only if TI2V-5B can't load, runs out of memory,
-  or returns broken (NaN or blank) frames. Because it's text-only, the clip **won't match the scene image**. The notebook log, the manifest and
-  `make_video.py` all say which model made each clip and, for a fallback, why.
-- **Measured on Kaggle T4 x2** (one clip, October 2026):
-
-  | Setup | Result | Peak GPU memory | Time for the clip |
-  |---|---|---|---|
-  | TI2V-5B at 1280x704, split across both GPUs / whole-model CPU offload | Out of memory | GPU full | – |
-  | Wan 2.1 1.3B fallback at 832x480 | Clip made (text-only) | – | 39.9 min |
-  | **TI2V-5B at 960x544, group offloading** | **Clip made from the image** | **6.0 GB** (12.5 GB on the second T4 while encoding) | **36.0 min** |
-
-  The whole 960x544 session, including installs, model downloads and encoding, took about 38 minutes of GPU time. 1280x704 with group
-  offloading hasn't been tested; it has about 1.7x the pixels, so expect roughly an hour per clip.
-- Clips are made one at a time on the first T4. Running one worker per GPU would need two pinned ~10 GB copies of the model in CPU RAM,
-  plus working memory, and Kaggle has about 29 GB.
-
-### How clips fill a scene
-Clips are about 5 seconds, and scenes are usually longer. The clip plays once at normal speed, then `--clip-fill` decides the rest:
-
-| `--clip-fill` | The rest of the scene |
-|---|---|
-| `pingpong` (default) | Plays backwards, then forwards, and so on, so there's never a jump back to the first frame |
-| `slowmo` | One slow-motion backwards pass stretched to fit, up to 3x slower; longer scenes alternate direction at 3x |
-| `freeze` | Holds the last frame |
-
-Clips are upscaled with Lanczos to 1920x1080. For the vertical video, the centre of the 1280x704 clip is cropped to 9:16, which
-leaves about 396x704 pixels of source, so vertical clips look softer than horizontal ones.
-
-### Kaggle images (`--image-provider kaggle`)
-To spend no online image quota at all, export with `--export-video-job --image-provider kaggle`. The job then also lists every scene that needs a still
-image and has none cached. The notebook makes them with **SDXL** (fp16, with the fp16-fix VAE) before the clips. FLUX schnell isn't used on Kaggle:
-even with CPU offload it needs about 34 GB of RAM in fp16. Importing with `--clips` copies the images into the `generated/` cache, so later runs reuse them.
-SDXL reads only the first 77 tokens of each prompt, so put the most important details first.
+- **Cached once:** results are saved in `generated/upscaled/`, named by a hash of the source image, so each image is upscaled only
+  once. A rerun with the same images doesn't touch Kaggle at all; after `--new-images` only the new ones go.
+- **How it runs:** the official Kaggle CLI uploads the images and `job.json` as the **private** dataset `<you>/ai-video-upscale-job`
+  (a new version each time, old versions deleted), pushes `kaggle/upscale.ipynb` as the **private** kernel `<you>/ai-video-upscale`
+  with GPU T4 and internet on, checks it every minute with its latest progress line, and downloads the results. You never open the
+  website. The notebook works in 512 px tiles in fp16, so any size fits on a T4. It loads the models with
+  [spandrel](https://github.com/chaiNNer-org/spandrel) instead of the `basicsr` package, which breaks on current torchvision.
+- **GPU time** is printed at the end from the session's own log timestamps, which is what Kaggle counts against the ~30 free GPU hours
+  a week. Each run has a hard time limit (15 min plus ~36 s per image, at most 2 hours), so a stuck run can't use up the quota.
+  **Measured on Script2** (October 2026): 38 images at 1536x864, 2x on one T4, took **2.0 s each** and a **1.9-minute
+  session** in all (about 0.6 min of install and model download), plus a few minutes queued and uploading. That's about 1% of a
+  week's free GPU hours.
+- **If it fails** (no token, Kaggle down, a timeout), the end of the Kaggle log is printed and the video renders from the original
+  images. Rerun with `--upscale` to retry; only the missing images are sent. Ctrl+C stops *watching*, not the run.
+- **Setup, once:** on Kaggle, go to **Settings > API Tokens > Generate New Token** and add `KAGGLE_API_TOKEN=...` to `.env`. This is the
+  new-style token, not the legacy `kaggle.json`. It's only given to the Kaggle CLI through its environment; it's never printed, logged
+  or written to a file. Kaggle may ask you to verify your phone number before kernels can use GPUs and the internet.
 
 ## Tests
 ```
 .venv\Scripts\python -m pip install pytest
 .venv\Scripts\python -m pytest
 ```
-The tests cover script parsing (including `[video]`/`[visual:]` tags and character lines), `--check`, `make_video.toml` defaults, the character sheet,
-caption timing and alignment, AI image providers and their fallbacks, video-job export, clip import, clip-fill timing, the Kaggle runner,
-YouTube metadata (chapters, title and tag limits, the thumbnail) and `research.py` (search parsing, missing captions, IP blocks).
-All Cloudflare, Pollinations, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that `kaggle/wan_video.ipynb`
-matches `kaggle/wan_video.py`. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
+The tests cover script parsing (including `[video]`/`[visual:]` tags and character lines), `--check`, `make_video.toml` defaults, the character sheet
+(names swapped for roles, only the scene's own characters), caption timing and alignment, AI image providers, models, sizes and their fallbacks,
+the Kaggle runner and `--upscale` (one batch, the cache, falling back to the originals), YouTube metadata (chapters, title and tag limits,
+the thumbnail), `research.py` (search parsing, missing captions, IP blocks) and the Remotion renderer's planning (timeline and crossfade
+maths, camera moves that never show an edge, per-format images, caption timing, place detection, when parallax is used). In `remotion/`,
+`npm run typecheck` checks the React code.
+All Cloudflare, Pollinations, Kaggle, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that
+`kaggle/upscale.ipynb` matches `kaggle/upscale.py`. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
 
 ## Credits
 The bundled font, `assets/fonts/NotoSans-Bold.ttf`, is licensed under the SIL Open Font License (`assets/fonts/OFL.txt`).
+Map shapes come from [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth, public domain). The parallax depth model is
+Depth Anything V2 Small (Apache-2.0). Upscaling uses Real-ESRGAN's weights (BSD-3-Clause) through spandrel (MIT). `.claude/skills/remotion-*` are Remotion's own agent skills ([remotion-dev/skills](https://github.com/remotion-dev/skills)).

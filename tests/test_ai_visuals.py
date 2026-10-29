@@ -71,7 +71,11 @@ def scenes(*texts):
 
 
 def run(sc, prompts, **kw):
-    return av.generate_scene_visuals(sc, prompts, creds=CREDS, **kw)
+    """One format, so the default sized model draws one image per scene (both formats are tested below)."""
+    return av.generate_scene_visuals(sc, prompts, creds=CREDS, **{"formats": ("horizontal",), **kw})
+
+
+ONE = {"formats": ("horizontal",)}
 
 
 # ---------- caching ----------
@@ -93,7 +97,9 @@ def test_cache_key_depends_on_prompt_model_and_size():
     base = av.image_path("a pot", "m1")
     assert base == av.image_path("a pot", "m1")
     assert len({base, av.image_path("a jar", "m1"), av.image_path("a pot", "m2"),
-                av.image_path("a pot", "m1", size="portrait")}) == 4
+                av.image_path("a pot", "m1", size="horizontal"), av.image_path("a pot", "m1", size="vertical")}) == 5
+    # sized keys use the pixel size, so changing SIZES never reuses an image of the old shape
+    assert av.image_path("a pot", "m1", "horizontal") == av.image_path("a pot", "m1", "1536x864")
 
 
 def test_new_images_keeps_saved_prompts_but_draws_again(api, tmp_path):
@@ -102,11 +108,11 @@ def test_new_images_keeps_saved_prompts_but_draws_again(api, tmp_path):
     run(first, prompts)
     api.calls.clear()
     again = scenes("One.", "Two.")
-    av.generate_scene_visuals(again, prompts, providers=av.Providers("cloudflare", creds=CREDS, new_images=True))
+    av.generate_scene_visuals(again, prompts, providers=av.Providers("cloudflare", creds=CREDS, new_images=True), **ONE)
     assert api.text_calls() == []  # saved prompts reused
     assert len(api.image_calls()) == 2  # cache skipped: both drawn again
-    # Workers AI rejects a seed for FLUX schnell; it varies the picture by itself (checked for real, Oct 2026)
-    assert all("seed" not in p for p in api.image_calls())
+    seeds = [p["seed"] for p in api.image_calls()]  # FLUX.2 takes a seed: a random one gives a new picture
+    assert len(set(seeds)) == 2
     assert [s["src"] for s in again] == [s["src"] for s in first]  # the new images replace the cached ones
     api.calls.clear()
     run(scenes("One.", "Two."), prompts)  # a normal run afterwards reuses the new images
@@ -115,8 +121,8 @@ def test_new_images_keeps_saved_prompts_but_draws_again(api, tmp_path):
 
 def test_new_images_uses_a_random_pollinations_seed(api, tmp_path, monkeypatch):
     seeds = []
-    monkeypatch.setattr(av, "pollinations_run",
-                        lambda prompt, key, seed, timeout=180: seeds.append(seed) or base64.b64decode(jpeg_b64()))
+    monkeypatch.setattr(av, "pollinations_run", lambda prompt, key, seed, timeout=180, size="square":
+                        seeds.append(seed) or base64.b64decode(jpeg_b64()))
     for new in (False, False, True):
         av.Providers("pollinations", creds=CREDS, poll_key="sk_x", new_images=new).image("a pot", regenerate=True)
     assert seeds[0] == seeds[1] == av.stable_seed("a pot") and seeds[2] != seeds[0]
@@ -159,8 +165,9 @@ def test_previous_prompt_is_context_and_style_is_appended(api, tmp_path):
     second_request = api.text_calls()[1]["messages"][1]["content"]
     assert "Prompt #1" in second_request
     img = api.image_calls()[0]
-    assert img["prompt"].startswith("Prompt #1, cinematic, warm tones, centered composition")
-    assert img["steps"] == av.IMAGE_STEPS and len(img["prompt"]) <= av.MAX_PROMPT
+    assert img["prompt"].startswith("Prompt #1, cinematic, warm tones, wide 16:9 frame")
+    assert (img["width"], img["height"]) == (1536, 864) and len(img["prompt"]) <= av.MAX_PROMPT
+    assert "steps" not in img  # FLUX.2 klein fixes its own 4 steps
 
 
 def test_text_model_failure_falls_back_to_template(api, tmp_path):
@@ -168,7 +175,7 @@ def test_text_model_failure_falls_back_to_template(api, tmp_path):
     run(scenes("Villagers stretch mesh nets."), tmp_path / "p.json")
     assert len(api.text_calls()) == av.ATTEMPTS
     template = av.fallback_prompt("Villagers stretch mesh nets.").rstrip(".")
-    assert api.image_calls()[0]["prompt"].startswith(template + ", centered composition")
+    assert api.image_calls()[0]["prompt"].startswith(template + ", " + av.COMPOSITION["horizontal"])
 
 
 def test_prompt_writer_is_never_told_about_shot_notes(api, tmp_path):
@@ -250,7 +257,7 @@ class FakePollinations:
     def __init__(self, fail=None):
         self.prompts, self.fail = [], fail
 
-    def __call__(self, prompt, key, seed, timeout=180):
+    def __call__(self, prompt, key, seed, timeout=180, size="square"):
         self.prompts.append(prompt)
         if self.fail:
             raise self.fail
@@ -273,7 +280,7 @@ def test_quota_exhausted_switches_to_pollinations_for_rest_of_run(api, tmp_path,
     monkeypatch.setattr(av, "pollinations_run", poll)
     p = av.Providers("auto", creds=CREDS, poll_key="sk_test")
     sc = scenes("One.", "Two.", "Three.")
-    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p) == []
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p, **ONE) == []
     assert len(api.calls) == 1  # Cloudflare tried once, then never again this run
     assert len(poll.prompts) == 3 and all(s["src"].exists() for s in sc)
     saved = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["scenes"]
@@ -292,7 +299,7 @@ def test_server_error_does_not_stop_cloudflare(api, tmp_path, monkeypatch):
         return {"image": jpeg_b64()}
     monkeypatch.setattr(av, "cf_run", cf)
     sc = scenes("One.", "Two.")
-    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("auto", creds=CREDS)) == [1]
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("auto", creds=CREDS), **ONE) == [1]
     assert sc[1]["src"].exists()  # scene 2 still went to Cloudflare
 
 
@@ -306,23 +313,16 @@ def test_both_providers_failing_falls_back_to_title_cards(api, tmp_path, monkeyp
     monkeypatch.setattr(av, "pollinations_run", poll)
     sc = scenes("One.", "Two.")
     failed = av.generate_scene_visuals(sc, tmp_path / "p.json",
-                                       providers=av.Providers("auto", creds=CREDS, poll_key="sk_test"))
+                                       providers=av.Providers("auto", creds=CREDS, poll_key="sk_test"), **ONE)
     assert failed == [1, 2] and all(s["src"] is None for s in sc)
     assert len(poll.prompts) == 1  # Pollinations also stopped after its credit ran out
 
 
 def test_cached_image_from_any_provider_is_reused(api, tmp_path):
     prompt = av.full_prompt("A pot", "")
-    av.save_image(base64.b64decode(jpeg_b64()), av.image_path(prompt, av.KAGGLE_CACHE_ID))
+    av.save_image(base64.b64decode(jpeg_b64()), av.image_path(prompt, av.POLLINATIONS_CACHE_ID))
     path, name, cached = av.Providers("cloudflare", creds=CREDS).image(prompt)
-    assert (name, cached) == ("kaggle", True) and api.image_calls() == []
-
-
-def test_kaggle_provider_never_calls_online_image_apis(api, tmp_path):
-    sc = scenes("One.")
-    assert av.generate_scene_visuals(sc, tmp_path / "p.json",
-                                     providers=av.Providers("kaggle", creds=CREDS)) == [1]
-    assert api.image_calls() == [] and len(api.text_calls()) == 1
+    assert (name, cached) == ("pollinations", True) and api.image_calls() == []
 
 
 def test_missing_all_credentials_in_auto_mode_explains_both(monkeypatch):
@@ -338,10 +338,22 @@ def test_neuron_estimate_uses_reported_tokens(api, tmp_path, monkeypatch):
         return {"image": jpeg_b64()}
     monkeypatch.setattr(av, "cf_run", cf)
     p = av.Providers("cloudflare", creds=CREDS)
-    av.generate_scene_visuals(scenes("One."), tmp_path / "p.json", providers=p)
+    av.generate_scene_visuals(scenes("One."), tmp_path / "p.json", providers=p)  # both formats: two images
     rate_in, rate_out = av.TEXT_NEURONS[av.TEXT_MODEL]
-    assert p.neurons == pytest.approx((1_000 * rate_in + 100 * rate_out) / 1e6 + av.FLUX_NEURONS)
+    images = av.image_neurons(av.IMAGE_MODEL, "horizontal") + av.image_neurons(av.IMAGE_MODEL, "vertical")
+    assert p.neurons == pytest.approx((1_000 * rate_in + 100 * rate_out) / 1e6 + images)
+
+
+def test_image_costs_follow_the_workers_ai_price_list():
+    # FLUX.2 klein 4B: 26.05 neurons per 512x512 output tile; FLUX.1 schnell: 4.80 per tile + 9.60 per step
+    assert av.image_neurons(av.IMAGE_MODEL, "horizontal") == pytest.approx(1536 * 864 / 512 ** 2 * 26.05)
+    assert av.image_neurons(av.IMAGE_MODEL, "horizontal") == pytest.approx(131.9, abs=0.1)
     assert av.FLUX_NEURONS == pytest.approx(57.6)
+    assert av.IMAGE_MODELS["flux-2-klein-9b"].neurons(1024, 1024) == pytest.approx(1363.64)
+    # the realistic alternatives cost 10-30x more: a whole video wouldn't fit the free 10,000 a day
+    two_per_scene = {n: 2 * 19 * m.neurons(1536, 864) for n, m in av.IMAGE_MODELS.items() if m.sized}
+    assert [n for n, c in two_per_scene.items() if c <= av.FREE_NEURONS_PER_DAY] == ["flux-2-klein-4b"]
+    assert two_per_scene["flux-2-klein-4b"] < 5_100
 
 
 def test_pollinations_errors_never_leak_key(monkeypatch):
@@ -397,3 +409,135 @@ def test_text_returns_json_text_when_the_reply_arrives_parsed(monkeypatch):
     monkeypatch.setattr(av, "cf_call", lambda model, payload, creds: {"response": {"titles": ["Fog Nets in Chile"]}})
     p = av.Providers("cloudflare", creds=CREDS, poll_key="")
     assert json.loads(p.text([{"role": "user", "content": "x"}])) == {"titles": ["Fog Nets in Chile"]}
+
+
+# ---------- image models and sizes ----------
+
+def test_sized_model_draws_a_real_16_9_and_9_16_image_per_scene(api, tmp_path):
+    sc = scenes("Fog over hills.")
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS)) == []
+    sizes = [(p["width"], p["height"]) for p in api.image_calls()]
+    assert sizes == [(1536, 864), (864, 1536)]
+    prompts = [p["prompt"] for p in api.image_calls()]
+    assert prompts[0].endswith(av.COMPOSITION["horizontal"]) and prompts[1].endswith(av.COMPOSITION["vertical"])
+    assert set(sc[0]["srcs"]) == {"horizontal", "vertical"} and sc[0]["srcs"]["horizontal"] != sc[0]["srcs"]["vertical"]
+    assert sc[0]["src"] == sc[0]["srcs"]["horizontal"] and sc[0]["ai"]
+    assert mv.scene_src(sc[0], "vertical") == sc[0]["srcs"]["vertical"]
+
+
+def test_square_model_draws_one_image_for_both_formats(api, tmp_path):
+    sc = scenes("Fog over hills.")
+    p = av.Providers("cloudflare", image_model="flux-1-schnell", creds=CREDS, new_images=True)
+    assert p.image_model == av.SQUARE_MODEL  # short names work
+    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p)
+    [img] = api.image_calls()
+    # Workers AI rejects a seed for FLUX schnell and only documents prompt + steps (checked for real, Oct 2026)
+    assert img["steps"] == 4 and not {"width", "height", "seed"} & set(img)
+    assert img["prompt"].endswith(av.COMPOSITION["square"]) and "srcs" not in sc[0]
+    assert mv.scene_src(sc[0], "vertical") == sc[0]["src"]
+
+
+def test_one_failed_shape_falls_back_to_the_other(api, tmp_path, monkeypatch):
+    def cf(model, payload, creds, timeout=120):
+        if model == av.TEXT_MODEL:
+            return {"response": "p"}
+        if payload["height"] > payload["width"]:
+            raise av.ProviderError("HTTP 400", status=400)
+        return {"image": jpeg_b64()}
+    monkeypatch.setattr(av, "cf_run", cf)
+    sc = scenes("One.")
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS)) == []
+    assert sc[0]["srcs"]["vertical"] == sc[0]["srcs"]["horizontal"]  # cropped from the 16:9 image
+
+
+def test_only_one_format_draws_only_that_shape(api, tmp_path):
+    run(scenes("One."), tmp_path / "p.json", formats=("vertical",))
+    assert [(p["width"], p["height"]) for p in api.image_calls()] == [(864, 1536)]
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, body, ctype):
+        super().__init__(body)
+        self.headers = {"Content-Type": ctype}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_flux2_requests_are_multipart_forms(monkeypatch):
+    seen = {}
+
+    def fake(req, timeout=None):
+        seen["ctype"], seen["body"] = req.get_header("Content-type"), req.data.decode()
+        return FakeResponse(json.dumps({"success": True, "result": {"image": jpeg_b64()}}).encode(), "application/json")
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    av.cf_run(av.IMAGE_MODEL, {"prompt": "a pot", "width": 1536, "height": 864}, CREDS)
+    assert seen["ctype"].startswith("multipart/form-data; boundary=")
+    assert 'name="prompt"\r\n\r\na pot\r\n' in seen["body"] and 'name="width"\r\n\r\n1536\r\n' in seen["body"]
+    av.cf_run(av.SQUARE_MODEL, {"prompt": "a pot", "steps": 4}, CREDS)
+    assert seen["ctype"] == "application/json" and json.loads(seen["body"]) == {"prompt": "a pot", "steps": 4}
+
+
+def test_a_reply_that_is_the_image_itself_is_accepted(monkeypatch):
+    jpeg = base64.b64decode(jpeg_b64())  # Leonardo Phoenix answers with image/jpeg bytes, not JSON
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: FakeResponse(jpeg, "image/jpeg"))
+    assert base64.b64decode(av.cf_run("@cf/leonardo/phoenix-1.0", {"prompt": "x"}, CREDS)["image"]) == jpeg
+
+
+def test_model_names_and_ids():
+    assert av.resolve_model("flux-2-klein-4b") == "@cf/black-forest-labs/flux-2-klein-4b" == av.IMAGE_MODEL
+    assert av.resolve_model("phoenix-1.0") == "@cf/leonardo/phoenix-1.0"
+    assert av.resolve_model("@cf/x/y") == "@cf/x/y" and av.model_info("@cf/x/y") is av.UNKNOWN_MODEL
+    assert av.model_info("@cf/leonardo/lucid-origin").steps_key == "num_steps"
+    assert not av.model_info(av.SQUARE_MODEL).sized and av.model_info(av.IMAGE_MODEL).form
+
+
+# ---------- prompts: style changes and characters ----------
+
+def test_a_new_style_rewrites_prompts_and_learned_characters_but_keeps_declared(api, tmp_path):
+    prompts = tmp_path / "p.json"
+    prompts.write_text(json.dumps({"style": "3D animated film style", "scenes": [
+        {"narration": "One.", "prompt": "a cartoon pot"}], "characters": {"Ama": "cartoon girl", "Kofi": "old man"}}))
+    sc = scenes("One.")
+    run(sc, prompts, style="photorealistic", characters={"Kofi": "old man, white beard"})
+    assert len(api.text_calls()) == 1  # written again for the new style
+    saved = json.loads(prompts.read_text(encoding="utf-8"))
+    assert saved["style"] == "photorealistic" and saved["characters"] == {"Kofi": "old man, white beard"}
+    api.calls.clear()
+    run(scenes("One."), prompts, style="photorealistic")
+    assert api.text_calls() == []  # same style: the saved prompt is reused
+
+
+def test_only_characters_named_in_the_scene_reach_the_prompt_writer(api, tmp_path):
+    # Script2 scene 14: given the whole sheet, the 8B writer drew the channel's boy instead of Sonam Wangchuk
+    sheet = {"Smart Village Boy": "twelve years old, red cap", "Sonam Wangchuk": "Ladakhi engineer in his late fifties"}
+    sc = [{"text": "Engineer Sonam Wangchuk piped meltwater downhill.", "visual": None, "src": None,
+           "description": "Sonam Wangchuk opening a valve on a pipe"}]
+    run(sc, tmp_path / "p.json", characters=sheet, prompts_only=True)
+    request = api.text_calls()[0]["messages"][1]["content"]
+    assert "Character sheet: Sonam Wangchuk = Ladakhi engineer" in request and "red cap" not in request
+
+
+def test_names_become_roles_in_image_prompts():
+    sheet = {"Sonam Wangchuk": "Ladakhi engineer in his late fifties, short greying hair",
+             "Smart Village Boy": "twelve years old, red cap", "Mohammed Bah Abba": "a Nigerian teacher in his fifties",
+             "Khasi villagers": "local villagers, traditional Khasi clothing"}
+    assert av.unname("Sonam Wangchuk opens a valve, sharp focus on Sonam and the ice", sheet) == \
+        "a Ladakhi engineer in his late fifties opens a valve, sharp focus on the Ladakhi engineer in his late fifties and the ice"
+    assert av.unname("Smart Village Boy waves", sheet) == "a village boy waves"
+    assert av.unname("Mohammed Bah Abba, a Nigerian teacher in his fifties, kneels", sheet) == \
+        "a Nigerian teacher in his fifties, kneels"
+    assert av.unname("Khasi villagers guide roots", sheet) == "Khasi villagers guide roots"  # a group, not a name
+    prompt = av.enforce_characters("Sonam Wangchuk at night", "Engineer Sonam Wangchuk piped meltwater.", sheet)
+    assert "Sonam" not in prompt and prompt.endswith("with Ladakhi engineer in his late fifties, short greying hair")
+
+
+def test_roles_and_group_words_are_not_learned_as_characters():
+    sheet = {}
+    av.learn(sheet, {"Alfredo Moser": "Brazilian mechanic", "Villagers": "mid-40s", "Farmer 1": "mid-40s"},
+             "In Brazil, a mechanic named Alfredo Moser. So villagers stretch huge nets.")
+    assert sheet == {"Alfredo Moser": "Brazilian mechanic"}
+    assert not av.mentioned("Khasi villagers", "Yet villagers around the world")  # "villagers" alone is generic

@@ -1,4 +1,4 @@
-"""Rebuild wan_video.ipynb from wan_video.py, so the two never drift apart.
+"""Rebuild upscale.ipynb from upscale.py, so the two never drift apart.
 
 Cells are separated by "# %%" lines; "# %% [markdown]" cells are markdown with "# " stripped.
 Usage: .venv\\Scripts\\python kaggle\\build_notebook.py
@@ -24,7 +24,7 @@ def cells_from_py(source):
     return cells
 
 
-def build(py=HERE / "wan_video.py"):
+def build(py=HERE / "upscale.py"):
     notebook = {
         "cells": cells_from_py(py.read_text(encoding="utf-8")),
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},

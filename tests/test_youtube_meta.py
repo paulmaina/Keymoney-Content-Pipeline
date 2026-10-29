@@ -257,7 +257,7 @@ def test_tags_stay_under_youtube_total():
 def test_description_has_hook_chapters_ai_line_and_hashtags():
     meta = {"hook": "Hook line.", "summary": "Summary.", "hashtags": ["#A", "#B"]}
     chaps = [(0, "Hook"), (12, "Hack 1"), (24, "Outro")]
-    scenes = [{"visual": None, "src": Path("generated/x.jpg")}, {"visual": None, "src": None, "clip": Path("c.mp4")}]
+    scenes = [{"visual": None, "src": Path("generated/x.jpg")}, {"visual": None, "src": None}]
     d = ym.description(meta, chaps, scenes, "Smart Village Boy")
     assert d.startswith("Hook line.\n\nSummary.\n\nChapters:\n0:00 Hook\n0:12 Hack 1\n0:24 Outro")
     assert "The visuals in this video are AI-generated" in d and d.endswith("#A #B")
@@ -266,12 +266,16 @@ def test_description_has_hook_chapters_ai_line_and_hashtags():
 def test_ai_line_says_ai_visuals_when_any_scene_used_them():
     own = {"visual": "a.png", "src": Path("assets/a.png")}
     ai = {"visual": None, "src": ai_visuals.GEN_DIR / "x.jpg"}
-    clip = {"visual": None, "src": None, "clip": Path("c.mp4")}
     card = {"visual": None, "src": None}
     pool = {"visual": None, "src": mv.FOOTAGE_DIRS[0] / "clip.mp4"}
+    # an upscaled picture is judged by its original: a footage photo stays footage, an AI image stays AI
+    pool_upscaled = {"visual": None, "src": ai_visuals.GEN_DIR / "upscaled" / "k.jpg",
+                     "upscaled_from": mv.FOOTAGE_DIRS[0] / "photo.jpg"}
+    ai_upscaled = {"visual": None, "src": ai_visuals.GEN_DIR / "upscaled" / "k.jpg", "ai": True,
+                   "upscaled_from": ai_visuals.GEN_DIR / "x.jpg"}
     assert ym.ai_line([own, card, ai]).startswith("The visuals in this video are AI-generated")
-    assert ym.ai_line([card, clip]).startswith("The visuals in this video are AI-generated")
-    assert ym.ai_line([own, card, pool]).startswith("The narration is an AI voice; this video has no")
+    assert ym.ai_line([card, ai_upscaled]).startswith("The visuals in this video are AI-generated")
+    assert ym.ai_line([own, card, pool, pool_upscaled]).startswith("The narration is an AI voice; this video has no")
 
 
 # ---------- thumbnail ----------
@@ -293,6 +297,9 @@ def test_best_picture_picks_the_most_striking_image(tmp_path):
     img.save(bright)
     scenes = [{"src": dull}, {"src": None}, {"src": bright}]
     assert ym.best_picture(scenes, tmp_path) == (bright, 3)
+    # the 16:9 image is the one a thumbnail is cut from, when the scene has one per format
+    scenes = [{"src": dull, "srcs": {"vertical": dull, "horizontal": bright}}]
+    assert ym.best_picture(scenes, tmp_path) == (bright, 1)
     assert ym.best_picture([{"src": None}], tmp_path) is None
 
 
@@ -342,6 +349,7 @@ class FakeProviders:
 
     def __init__(self, mode, image_model, text_model, creds=None, poll_key=None):
         self.text_model, self.cf_ok, self.neurons = text_model, True, 0.0
+        self.model = ai_visuals.model_info(ai_visuals.resolve_model(image_model))
 
     def text(self, messages, max_tokens=160):
         FakeProviders.calls.append((self.text_model, messages, max_tokens))
@@ -349,7 +357,7 @@ class FakeProviders:
                            "hook": "This fridge runs on water and mud.", "summary": "We visit Nigeria's clay pots.",
                            "tags": ["mud fridge"], "hashtags": ["#MudFridge"], "thumbnail_text": "MUD FRIDGE"})
 
-    def image(self, prompt, regenerate=False):
+    def image(self, prompt, regenerate=False, size="square"):
         raise ai_visuals.ProviderError("no images in tests")
 
     def report(self):
@@ -380,3 +388,12 @@ def test_estimate_is_a_few_dozen_neurons_for_a_long_script():
 def test_no_metadata_flag():
     assert mv.parse_args(["s.txt"]).no_metadata is False
     assert mv.parse_args(["s.txt", "--no-metadata"]).no_metadata is True
+
+
+def test_write_moves_chapters_after_an_intro(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai_visuals, "credentials", lambda required=True: None)
+    p = script(tmp_path, "# HOOK\nNo electricity, no fridge.\n\n# HACK 1\nClay pots.\n\n# OUTRO\nBye.\n")
+    scenes = [dict(s, dur=12.0, src=None) for s in mv.parse_script(p)]
+    md, _ = ym.write(scenes, p, tmp_path / "s", args(), tmp_path, 41.5, lead_in=1.73)
+    text = md.read_text(encoding="utf-8")
+    assert "- 0:00 Hook\n- 0:13 Hack 1\n- 0:25 Outro" in text and "Length 0:41" in text

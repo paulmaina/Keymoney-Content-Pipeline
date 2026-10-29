@@ -1,7 +1,7 @@
 # Your defaults for make_video.py. Any option can go here, written like the command-line option
-# without the leading dashes (generate-visuals = true, kaggle-size = "1280x704", ...).
+# without the leading dashes (generate-visuals = true, image-model = "flux-2-klein-4b", upscale = true, ...).
 # Options you type on the command line always win; VIDEO_STYLE in .env overrides style below.
 [defaults]
-style = "3D animated film style, colourful, expressive characters"
+style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
 voice = "en-US-EmmaMultilingualNeural"
 rate = "+5%"

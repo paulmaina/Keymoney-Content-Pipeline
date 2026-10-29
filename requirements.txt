@@ -1,5 +1,6 @@
 edge-tts>=7.3
 kokoro-onnx>=0.4.7
+onnxruntime>=1.20  # Kokoro voice and the parallax depth model
 soundfile>=0.14
 faster-whisper>=1.2.1
 numpy>=2.0
