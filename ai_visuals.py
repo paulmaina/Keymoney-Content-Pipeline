@@ -23,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -56,7 +57,25 @@ TEXT_NEURONS = {
     "@cf/meta/llama-3.1-8b-instruct-fp8-fast": (4_119, 34_868),
     "@cf/meta/llama-3.2-3b-instruct": (4_625, 30_475),
     "@cf/meta/llama-3.3-70b-instruct-fp8-fast": (26_668, 204_805),
+    "@cf/meta/llama-4-scout-17b-16e-instruct": (24_545, 77_273),
+    "@cf/meta/llama-3.2-11b-vision-instruct": (4_410, 61_493),
 }
+# --check-images: a vision model looks at every image for broken anatomy and stray text. Llama 4 Scout is natively
+# multimodal and needs no licence step (Llama 3.2 Vision does). The image goes in at QC_SIDE px: about 40 neurons a check.
+VISION_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+QC_SIDE = 1024
+QC_RETRIES = 2  # redraws after a failed check; then the best of the tries is kept and flagged
+QC_IMAGE_TOKENS = 1_200  # guess for the image's share of the input, when the reply has no usage
+QC_SYSTEM = (
+    "You check AI-generated photographs for a documentary video before they are used. Look carefully at every person "
+    "and animal, one at a time. Reply with JSON only: "
+    '{"ok": true or false, "problems": ["short description", ...], "score": 0-10}. '
+    "Set ok to false if you see any of these: an extra or missing arm, leg, hand or finger (count the fingers on every "
+    "visible hand); fused, twisted or floating limbs; a hand or arm that belongs to no one; a duplicated, melted or "
+    "distorted face; an extra head; or any letters, words, numbers, logos or watermarks anywhere in the image. "
+    "Tiny background figures too small to judge don't count, and neither do style, lighting or composition. "
+    "score is the image's overall soundness: 10 means no defects at all. If ok is true, problems is empty."
+)
 
 
 def tiles(w, h):
@@ -142,6 +161,11 @@ PROMPT_SYSTEM = (
     "35mm lens'), natural light, real skin texture, fabric and materials, believable everyday detail, nothing fantastical. "
     "If a character sheet is given, describe every listed character who appears exactly as the sheet does, "
     "so they look the same in every scene. "
+    "Image models often draw broken hands and limbs, so for every person give one simple, clear pose: hands resting, "
+    "holding one object with both hands, or at their sides, and say what each hand does (e.g. 'both hands on the rim of "
+    "the pot'). Avoid poses that tangle limbs: waving with spread fingers, pointing, interlocked or overlapping hands, "
+    "hands near the face, crowds of hands, or several people touching the same thing. If the description asks for such a "
+    "pose, choose the simplest version of it (a raised open palm for a wave, a hand resting on the globe for pointing). "
     "Keep the main subject centred. Reply with the prompt only, no preamble or quotes. "
     "Then, on a new last line starting with 'CHARACTERS:', list each recurring person or animal in the shot as "
     "'name or role = short visual description (age, build, hair, clothing, colours)', separated by ';', "
@@ -309,18 +333,81 @@ def image_path(prompt, model, size="square"):
 
 
 def save_image(data, path):
+    """Write an image into the cache. Files made from the image it replaces (its parallax mask, its quality
+    verdict) are deleted, so a redrawn picture never keeps the old one's."""
     GEN_DIR.mkdir(exist_ok=True)
     tmp = path.with_suffix(".part")
     tmp.write_bytes(data)
+    for old in path.parent.glob(path.stem + ".*"):
+        if old not in (path, tmp):
+            old.unlink()
     tmp.replace(path)
     return path
+
+
+# ---------- quality check ----------
+
+def qc_path(image):
+    return Path(image).with_suffix(".qc.json")
+
+
+def load_verdict(image):
+    try:
+        v = json.loads(qc_path(image).read_text(encoding="utf-8"))
+        return v if isinstance(v, dict) and "ok" in v else None
+    except (OSError, ValueError):
+        return None
+
+
+def save_verdict(image, verdict):
+    qc_path(image).write_text(json.dumps(verdict, ensure_ascii=False), encoding="utf-8")
+
+
+def parse_verdict(reply):
+    """{"ok", "problems", "score"} from the vision model's reply, or None if it can't be read."""
+    if not reply:
+        return None
+    text = reply[reply.find("{"):reply.rfind("}") + 1]
+    try:
+        data = json.loads(text)
+    except ValueError:
+        m = re.search(r'"ok"\s*:\s*(true|false)', reply, re.I)
+        if not m:
+            return None
+        data = {"ok": m.group(1).lower() == "true"}
+    if not isinstance(data, dict) or not isinstance(data.get("ok"), bool):
+        return None
+    problems = data.get("problems") or []
+    problems = [str(p).strip() for p in (problems if isinstance(problems, list) else [problems]) if str(p).strip()]
+    try:
+        score = max(0, min(10, int(round(float(data.get("score", 10 if data["ok"] else 0))))))
+    except (TypeError, ValueError):
+        score = 10 if data["ok"] else 0
+    if data["ok"] and problems:  # a model that lists defects hasn't passed the image, whatever it says
+        data["ok"] = False
+    return {"ok": data["ok"], "problems": problems, "score": score}
+
+
+def better(a, b):
+    """True if verdict a beats verdict b: a pass beats a fail, then the higher score."""
+    return (a["ok"], a["score"], -len(a["problems"])) > (b["ok"], b["score"], -len(b["problems"]))
+
+
+def data_uri(image, side=QC_SIDE):
+    from PIL import Image
+    with Image.open(image) as img:
+        img = img.convert("RGB")
+        img.thumbnail((side, side))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 class Providers:
     """Image providers and the prompt-writing text model for one run, with fallback and usage counts."""
 
     def __init__(self, mode="auto", image_model=IMAGE_MODEL, text_model=TEXT_MODEL, creds=None, poll_key=None,
-                 new_images=False):
+                 new_images=False, vision_model=VISION_MODEL):
         if mode not in PROVIDERS:
             raise ValueError(f"unknown image provider {mode}")
         image_model = resolve_model(image_model)
@@ -338,7 +425,8 @@ class Providers:
         if mode == "auto" and not self.poll_key:
             print("  (no POLLINATIONS_API_KEY: if Cloudflare's daily allowance runs out, remaining scenes get title cards)")
         self.cf_ok = bool(self.creds)  # the text model always uses Cloudflare when it's available
-        self.neurons = 0.0
+        self.vision_model = vision_model
+        self.neurons = self.qc_neurons = 0.0
         self.counts = Counter()
 
     def _disable_cloudflare(self, e):
@@ -352,28 +440,47 @@ class Providers:
         nxt = "Pollinations" if self.mode == "auto" and self.poll_key else "title cards / template prompts"
         print(f"  Cloudflare {why} ({e}); not calling it again this run, using {nxt}.")
 
-    def text(self, messages, max_tokens=160):
-        """Run the prompt-writing model. Returns None if it's unavailable or fails."""
+    def text(self, messages, max_tokens=160, model=None, temperature=0.7):
+        """Run the prompt-writing model (or `model`, e.g. the vision checker). Returns None if it's unavailable or fails."""
         if not self.cf_ok:
             return None
+        model = model or self.text_model
         try:
-            result = cf_call(self.text_model, {"messages": messages, "max_tokens": max_tokens,
-                                               "temperature": 0.7}, self.creds)
+            result = cf_call(model, {"messages": messages, "max_tokens": max_tokens,
+                                     "temperature": temperature}, self.creds)
         except ProviderError as e:
             if e.stops_provider:
                 self._disable_cloudflare(e)
-            print(f"    prompt writer failed ({e}); using a simple prompt")
+            print(f"    {'quality check' if model == self.vision_model else 'prompt writer'} failed ({e}); "
+                  f"{'image kept unchecked' if model == self.vision_model else 'using a simple prompt'}")
             return None
         usage = result.get("usage") or {}
         response = result.get("response")
         if isinstance(response, (dict, list)):  # some models' JSON replies arrive already parsed
             response = json.dumps(response, ensure_ascii=False)
-        tin = usage.get("prompt_tokens") or sum(len(m["content"]) for m in messages) / 4
+        chars = sum(len(c) if isinstance(c, str) else sum(len(p.get("text", "")) for p in c)
+                    for c in (m["content"] for m in messages))
+        images = sum(not isinstance(m["content"], str) and any(p.get("type") == "image_url" for p in m["content"])
+                     for m in messages)
+        tin = usage.get("prompt_tokens") or chars / 4 + images * QC_IMAGE_TOKENS
         tout = usage.get("completion_tokens") or len(str(response or "")) / 4
-        rate_in, rate_out = TEXT_NEURONS.get(self.text_model, TEXT_NEURONS[TEXT_MODEL])
-        self.neurons += (tin * rate_in + tout * rate_out) / 1e6
-        self.counts["text"] += 1
+        rate_in, rate_out = TEXT_NEURONS.get(model, TEXT_NEURONS[TEXT_MODEL])
+        cost = (tin * rate_in + tout * rate_out) / 1e6
+        self.neurons += cost
+        if model == self.vision_model:
+            self.qc_neurons += cost
+        self.counts["qc" if model == self.vision_model else "text"] += 1
         return str(response or "").strip().strip('"').strip() or None
+
+    def inspect(self, image, shot=""):
+        """Ask the vision model whether an image has broken anatomy or stray text. Returns a verdict, or None when it
+        can't be checked (no Cloudflare, quota used up, unreadable reply)."""
+        content = [{"type": "text", "text": f"The picture was meant to show: {shot[:500]}\nCheck it." if shot
+                    else "Check this picture."},
+                   {"type": "image_url", "image_url": {"url": data_uri(image)}}]
+        reply = self.text([{"role": "system", "content": QC_SYSTEM}, {"role": "user", "content": content}],
+                          max_tokens=160, model=self.vision_model, temperature=0.1)
+        return parse_verdict(reply)
 
     def sizes(self, formats):
         """The image shapes to draw: one per video format for a sized model, else one square for all."""
@@ -389,13 +496,13 @@ class Providers:
                 return p, name
         return None
 
-    def _cloudflare(self, prompt, size):
+    def _cloudflare(self, prompt, size, fresh):
         payload = {"prompt": prompt}
         if self.model.sized:
             payload["width"], payload["height"] = (min(v, self.model.max_side) for v in dims(size))
         if self.model.steps:
             payload[self.model.steps_key] = self.model.steps
-        if self.new_images and self.model.sized:  # FLUX.1 schnell rejects a seed and varies by itself
+        if fresh and self.model.sized:  # FLUX.1 schnell rejects a seed and varies by itself
             payload["seed"] = random_seed()
         result = cf_call(self.image_model, payload, self.creds)
         try:
@@ -405,13 +512,15 @@ class Providers:
         self.neurons += self.model.neurons(*dims(size))
         return check_image(data)
 
-    def _pollinations(self, prompt, size):
-        seed = random_seed() if self.new_images else stable_seed(prompt)
+    def _pollinations(self, prompt, size, fresh):
+        seed = random_seed() if fresh else stable_seed(prompt)
         return check_image(with_retries(pollinations_run, prompt, self.poll_key, seed, 180, size))
 
-    def image(self, prompt, regenerate=False, size="square"):
-        """Return (path, provider, from_cache). Raises ProviderError when no provider can make it."""
-        if not (regenerate or self.new_images) and (hit := self.cached(prompt, size)):
+    def image(self, prompt, regenerate=False, size="square", fresh=False):
+        """Return (path, provider, from_cache). `fresh` (or --new-images) skips the cache and draws with a new random
+        seed, replacing the cached image. Raises ProviderError when no provider can make it."""
+        fresh = fresh or self.new_images
+        if not (regenerate or fresh) and (hit := self.cached(prompt, size)):
             return hit[0], hit[1], True
         attempts = []
         if self.mode in ("auto", "cloudflare") and self.cf_ok:
@@ -421,7 +530,7 @@ class Providers:
         errors = []
         for name, cache_id, make in attempts:
             try:
-                path = save_image(make(prompt, size), image_path(prompt, cache_id, size))
+                path = save_image(make(prompt, size, fresh), image_path(prompt, cache_id, size))
             except ProviderError as e:
                 errors.append(f"{name}: {e}")
                 if name == "cloudflare" and e.stops_provider:
@@ -437,7 +546,8 @@ class Providers:
 
     def report(self):
         if self.neurons:
-            print(f"  Cloudflare usage this run: ~{self.neurons:.0f} neurons "
+            qc = f", of which ~{self.qc_neurons:.0f} for {self.counts['qc']} quality check(s)" if self.counts["qc"] else ""
+            print(f"  Cloudflare usage this run: ~{self.neurons:.0f} neurons{qc} "
                   f"(free allowance {FREE_NEURONS_PER_DAY:,}/day; estimate from the published rates)")
 
 
@@ -621,13 +731,60 @@ def learn(sheet, found, text=None):
             known.add(name.lower())
 
 
+def draw(providers, prompt, size, shot, regenerate=False, fresh=False, check=False, label=""):
+    """One image, with the optional quality check: a failed image is redrawn with a new seed up to QC_RETRIES times,
+    and the best try is kept. Returns (path, provider, cached, verdict or None)."""
+    path, name, cached = providers.image(prompt, regenerate, size, fresh)
+    if not check:
+        return path, name, cached, None
+    verdict = load_verdict(path)  # a cached image checked on an earlier run isn't paid for again
+    if verdict is None and providers.cf_ok:
+        verdict = providers.inspect(path, shot)
+        if verdict:
+            save_verdict(path, verdict)
+    if verdict is None or verdict["ok"]:
+        return path, name, cached, verdict
+    tries = [(verdict, GEN_DIR / f"_try_{path.stem}_0{path.suffix}")]
+    shutil.copy(path, tries[0][1])
+    for n in range(1, QC_RETRIES + 1):
+        print(f"    {label}: {', '.join(verdict['problems']) or 'failed the check'}; redrawing ({n}/{QC_RETRIES})")
+        try:
+            path, name, cached = providers.image(prompt, True, size, fresh=True)
+        except ProviderError as e:
+            print(f"    {label}: redraw failed ({e})")
+            break
+        verdict = providers.inspect(path, shot)
+        if verdict is None:  # can't check any more: keep the best checked try
+            break
+        tries.append((verdict, GEN_DIR / f"_try_{path.stem}_{n}{path.suffix}"))
+        shutil.copy(path, tries[-1][1])
+        if verdict["ok"]:
+            break
+    best, best_file = tries[0]
+    for v, f in tries[1:]:
+        if better(v, best):
+            best, best_file = v, f
+    if verdict is None or best is not verdict:
+        shutil.copy(best_file, path)  # the latest draw lost: put the best one back in the cache
+        for old in path.parent.glob(path.stem + ".*"):  # its mask (if any) belonged to the latest draw
+            if old != path:
+                old.unlink()
+    save_verdict(path, best)
+    for _, f in tries:
+        f.unlink(missing_ok=True)
+    return path, name, False, best
+
+
 def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", regenerate=False, creds=None,
                            prompts_only=False, provider="auto", text_model=TEXT_MODEL, providers=None,
-                           characters=None, formats=("horizontal", "vertical")):
+                           characters=None, formats=("horizontal", "vertical"), redo=(), check=False):
     """Fill s["src"] (and s["image_prompt"]) for every scene without a [visual: ...] line. A model that takes a
     size draws one image per format, in s["srcs"] ({format: path}); s["src"] is the first format's.
     `characters` is the script's declared character sheet; recurring characters the prompt writer
     describes are added to it, and every image prompt that names one gets its description.
+    `redo` holds 0-based scene indices to draw again with a new seed (--redo-scenes); every other scene keeps its cached
+    images. With `check`, each image is looked over by the vision model and redrawn if it fails (see draw()); scenes that
+    still fail are listed in the log and in s["quality_flags"].
     Scenes whose image can't be made keep src None (title card). Returns the 1-based numbers of
     failed scenes. With prompts_only, stop after writing the prompts file."""
     targets = [(i, s) for i, s in enumerate(scenes) if not s["visual"]]
@@ -671,19 +828,26 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
         providers.report()
         return []
 
-    failed = []
+    failed, flagged = [], []
     made = Counter()
     for (i, s), rec, shot in zip(targets, records, shots):
         paths, errors, new = {}, [], False
         for size in sizes:
+            label = f"scene {i + 1}" + ("" if size == "square" else f" {size}")
             try:
-                paths[size], name, cached = providers.image(full_prompt(shot, style, size), regenerate, size)
+                paths[size], name, cached, verdict = draw(providers, full_prompt(shot, style, size), size, shot,
+                                                          regenerate, i in redo, check, label)
             except ProviderError as e:
                 errors.append(str(e))
                 continue
             rec["image_provider"] = name
             made["cached" if cached else name] += 1
             new |= not cached
+            if verdict:
+                rec.setdefault("quality", {})[size] = verdict
+                if not verdict["ok"]:
+                    s.setdefault("quality_flags", []).append(f"{size}: {', '.join(verdict['problems']) or 'failed'}")
+                    flagged.append(f"{label} ({', '.join(verdict['problems']) or 'failed the check'})")
         if not paths:
             print(f"  scene {i + 1}: FAILED ({'; '.join(errors)}); using a title card")
             s["src"] = None
@@ -701,5 +865,12 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     save(records)
     summary = ", ".join(f"{n} {k}" for k, n in made.items()) or "none"
     print(f"  images: {summary}; {len(failed)} failed")
+    if check:
+        print(f"  quality check ({providers.vision_model.rsplit('/', 1)[-1]}): {providers.counts['qc']} check(s), "
+              f"~{providers.qc_neurons:.0f} neurons; "
+              + (f"{len(flagged)} image(s) still flagged after {QC_RETRIES} redraws, best try kept:" if flagged
+                 else "every image passed"))
+        for f in flagged:
+            print(f"    FLAGGED {f}")
     providers.report()
     return failed

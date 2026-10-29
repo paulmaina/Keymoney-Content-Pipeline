@@ -347,3 +347,24 @@ def test_mentioned_matches_any_distinctive_word_as_a_whole_word():
     assert av.mentioned("Grandpa Kofi", "Kofi smiled") and av.mentioned("Grandpa Kofi", "Grandpa laughed")
     assert not av.mentioned("Ama", "the drama begins")
     assert not av.mentioned("The Old Man", "an old tree")  # generic words alone don't count
+
+
+def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
+    text = "Ama runs.\n\nKofi waves.\n"
+    prompts = tmp_path / "Exports" / "story_prompts.json"
+    prompts.parent.mkdir(parents=True)
+    prompts.write_text(json.dumps({"scenes": [{"narration": "Ama runs.", "prompt": "a girl running"},
+                                              {"narration": "Kofi waves.", "prompt": "an old man"}]}))
+    for shot in ("a girl running", "an old man"):
+        for z in ("horizontal", "vertical"):
+            av.save_image(b"jpg", av.image_path(av.full_prompt(shot, "", z), av.IMAGE_MODEL, z))
+    av.save_verdict(av.image_path(av.full_prompt("a girl running", "", "horizontal"), av.IMAGE_MODEL, "horizontal"),
+                    {"ok": True, "problems": [], "score": 9})
+    est = check(tmp_path, text, "--style", "")["estimates"]
+    assert (est["images_cached"], est["images_new"], est["checks"]) == (4, 0, 0)
+    est = check(tmp_path, text, "--style", "", "--redo-scenes", "2", "--check-images")["estimates"]
+    assert (est["images_cached"], est["images_new"]) == (2, 2)
+    assert est["checks"] == 1 + 2  # scene 1's unchecked vertical image, and scene 2's two new ones
+    assert est["neurons_checks"] == pytest.approx(3 * sc.check_neurons(av.VISION_MODEL))
+    assert 25 < sc.check_neurons(av.VISION_MODEL) < 60

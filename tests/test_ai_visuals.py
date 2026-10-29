@@ -2,6 +2,7 @@
 import base64
 import io
 import json
+import sys
 import urllib.error
 import urllib.request
 
@@ -541,3 +542,154 @@ def test_roles_and_group_words_are_not_learned_as_characters():
              "In Brazil, a mechanic named Alfredo Moser. So villagers stretch huge nets.")
     assert sheet == {"Alfredo Moser": "Brazilian mechanic"}
     assert not av.mentioned("Khasi villagers", "Yet villagers around the world")  # "villagers" alone is generic
+
+
+# ---------- --redo-scenes and --check-images ----------
+
+class FakeVision(FakeAPI):
+    """FakeAPI plus a vision model that answers from a list of verdicts (dicts) or raw strings."""
+
+    def __init__(self, verdicts=()):
+        super().__init__()
+        self.verdicts = list(verdicts)
+
+    def __call__(self, model, payload, creds, timeout=120):
+        if model == av.VISION_MODEL:
+            self.calls.append((model, payload))
+            v = self.verdicts.pop(0) if self.verdicts else {"ok": True, "problems": [], "score": 9}
+            return {"response": v if isinstance(v, str) else json.dumps(v),
+                    "usage": {"prompt_tokens": 900, "completion_tokens": 40}}
+        return super().__call__(model, payload, creds, timeout)
+
+    def checks(self):
+        return [p for m, p in self.calls if m == av.VISION_MODEL]
+
+    def image_calls(self):
+        return [p for m, p in self.calls if m not in (av.TEXT_MODEL, av.VISION_MODEL)]
+
+
+@pytest.fixture
+def vision(monkeypatch, tmp_path):
+    fake = FakeVision()
+    monkeypatch.setattr(av, "cf_run", fake)
+    monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
+    monkeypatch.setattr(av.time, "sleep", lambda s: None)
+    return fake
+
+
+BAD = {"ok": False, "problems": ["six fingers on the left hand"], "score": 3}
+WORSE = {"ok": False, "problems": ["extra arm", "text on shirt"], "score": 1}
+
+
+def test_redo_scenes_redraws_only_those_with_a_new_seed(api, tmp_path):
+    prompts = tmp_path / "p.json"
+    first = scenes("One.", "Two.", "Three.")
+    run(first, prompts)
+    api.calls.clear()
+    again = scenes("One.", "Two.", "Three.")
+    run(again, prompts, redo={1})
+    assert api.text_calls() == [] and len(api.image_calls()) == 1  # prompts and the other scenes from the cache
+    assert "seed" in api.image_calls()[0]
+    assert again[1]["src"] == first[1]["src"]  # the new picture replaces the cached one
+
+
+def test_redrawing_an_image_drops_its_old_parallax_mask_and_verdict(tmp_path, monkeypatch):
+    monkeypatch.setattr(av, "GEN_DIR", tmp_path)
+    img = av.save_image(base64.b64decode(jpeg_b64()), tmp_path / "abc.jpg")
+    (tmp_path / "abc.v1_fg.png").write_bytes(b"mask")
+    av.save_verdict(img, {"ok": True, "problems": [], "score": 9})
+    (tmp_path / "abcd.jpg").write_bytes(b"other image")
+    av.save_image(base64.b64decode(jpeg_b64()), img)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["abc.jpg", "abcd.jpg"]
+
+
+def test_check_passes_good_images_and_counts_neurons(vision, tmp_path):
+    p = av.Providers("cloudflare", creds=CREDS)
+    sc = scenes("A farmer at a stone channel.")
+    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p, check=True, **ONE)
+    [check] = vision.checks()
+    assert check["messages"][0]["content"] == av.QC_SYSTEM
+    part = check["messages"][1]["content"][1]
+    assert part["type"] == "image_url" and part["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    rate_in, rate_out = av.TEXT_NEURONS[av.VISION_MODEL]
+    assert p.qc_neurons == pytest.approx((900 * rate_in + 40 * rate_out) / 1e6)
+    assert len(vision.image_calls()) == 1 and "quality_flags" not in sc[0]
+    assert av.load_verdict(sc[0]["src"])["ok"]
+
+
+def test_failed_image_is_redrawn_until_it_passes(vision, tmp_path):
+    vision.verdicts = [BAD, {"ok": True, "problems": [], "score": 8}]
+    sc = scenes("A boy waves.")
+    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS), check=True,
+                              **ONE)
+    assert len(vision.image_calls()) == 2 and len(vision.checks()) == 2
+    assert "seed" in vision.image_calls()[1]  # the redraw uses a new seed
+    assert "quality_flags" not in sc[0] and av.load_verdict(sc[0]["src"])["score"] == 8
+    assert not list(av.GEN_DIR.glob("_try_*"))  # the tries are cleaned up
+
+
+def test_still_failing_keeps_the_best_try_and_flags_it(vision, tmp_path, capsys, monkeypatch):
+    drawn = iter([(10, 10, 10), (20, 20, 20), (30, 30, 30)])
+
+    def colour_jpeg():
+        buf = io.BytesIO()
+        Image.new("RGB", (8, 8), next(drawn)).save(buf, "JPEG")
+        return base64.b64encode(buf.getvalue()).decode()
+    monkeypatch.setattr(sys.modules[__name__], "jpeg_b64", colour_jpeg)
+    vision.verdicts = [WORSE, BAD, WORSE]  # the second try is the best
+    sc = scenes("A boy waves.")
+    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS), check=True,
+                              **ONE)
+    assert len(vision.image_calls()) == 1 + av.QC_RETRIES
+    with Image.open(sc[0]["src"]) as img:
+        assert abs(img.getpixel((4, 4))[0] - 20) < 6  # the best try was put back in the cache
+    assert av.load_verdict(sc[0]["src"]) == BAD
+    assert sc[0]["quality_flags"] == ["horizontal: six fingers on the left hand"]
+    out = capsys.readouterr().out
+    assert "FLAGGED scene 1 horizontal (six fingers on the left hand)" in out and "~" in out
+    saved = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["scenes"][0]
+    assert saved["quality"]["horizontal"] == BAD
+
+
+def test_cached_checked_images_are_not_checked_again(vision, tmp_path):
+    prompts = tmp_path / "p.json"
+    run(scenes("One."), prompts, check=True)
+    vision.calls.clear()
+    run(scenes("One."), prompts, check=True)
+    assert vision.calls == []
+
+
+def test_unreadable_verdict_keeps_the_image_unchecked(vision, tmp_path):
+    vision.verdicts = ["I cannot help with that."]
+    sc = scenes("One.")
+    run(sc, tmp_path / "p.json", check=True)
+    assert len(vision.image_calls()) == 1 and "quality_flags" not in sc[0]
+    assert av.load_verdict(sc[0]["src"]) is None  # tried again next run
+
+
+def test_no_check_without_the_option(vision, tmp_path):
+    run(scenes("One."), tmp_path / "p.json")
+    assert vision.checks() == []
+
+
+def test_parse_verdict():
+    assert av.parse_verdict('Sure! {"ok": true, "problems": [], "score": 9}') == {"ok": True, "problems": [], "score": 9}
+    # listing a defect means it didn't pass, whatever "ok" says
+    assert av.parse_verdict('{"ok": true, "problems": ["extra finger"], "score": 7}')["ok"] is False
+    assert av.parse_verdict('{"ok": false, "problems": "text on sign", "score": "4"}') == \
+        {"ok": False, "problems": ["text on sign"], "score": 4}
+    assert av.parse_verdict('"ok": false, broken json') == {"ok": False, "problems": [], "score": 0}
+    assert av.parse_verdict("no idea") is None and av.parse_verdict(None) is None
+    assert av.better({"ok": True, "problems": [], "score": 5}, BAD) and av.better(BAD, WORSE)
+
+
+def test_prompt_writer_is_asked_for_simple_hand_poses():
+    assert "simple, clear pose" in av.PROMPT_SYSTEM and "waving with spread fingers" in av.PROMPT_SYSTEM
+
+
+def test_redo_and_check_options():
+    a = mv.parse_args(["s.txt", "--redo-scenes", "3, 7"])
+    assert a.redo == {2, 6} and a.generate_visuals and not a.check_images
+    assert mv.parse_args(["s.txt", "--check-images"]).vision_model == av.VISION_MODEL
+    with pytest.raises(SystemExit):
+        mv.parse_args(["s.txt", "--redo-scenes", "three"])

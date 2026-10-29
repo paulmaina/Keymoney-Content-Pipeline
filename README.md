@@ -118,6 +118,8 @@ Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the f
 | `--prompts-only` | Write the AI image prompts for review, then stop (no images, audio or video) |
 | `--regenerate` | Ignore cached AI images and saved prompts for this run (your edited prompts are rewritten) |
 | `--new-images` | Keep the saved prompts but draw every image again; the new ones replace the cached ones |
+| `--redo-scenes "3,7"` | Draw only those scenes' images again with a new seed; everything else stays cached (turns on `--generate-visuals`) |
+| `--check-images` | A vision model checks every AI image for extra or missing limbs, fingers or faces and stray text; failures are redrawn up to 2 times (see [Quality check](#quality-check---check-images)) |
 | `--image-provider auto` | Where AI images come from: `auto` (default), `cloudflare` or `pollinations` (see below) |
 | `--image-model flux-2-klein-4b` | The Workers AI image model, by short name or `@cf/...` ID (see [Image models](#image-models)) |
 | `--text-model @cf/...` | A different Workers AI model for writing prompts (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) |
@@ -284,10 +286,31 @@ scene, cropped to both formats. `--format horizontal` or `vertical` draws only t
 3. **Images.** The image model draws each scene, once per format for a sized model (see [Image models](#image-models)).
    `--new-images` sends a fresh random seed.
 4. **Cache.** Images are saved in `generated/`, named by a hash of the prompt, size and model. Reruns reuse them and don't spend your quota.
-   `--regenerate` forces new prompts and images.
-5. **Failures.** Network errors and rate limits are retried 3 times. If one shape fails, the other is cropped to fit. A scene that still
+   `--regenerate` forces new prompts and images, `--new-images` new images for every scene, and `--redo-scenes "3,7"` new images
+   for just those scenes (both formats, new seed, same prompt). A redrawn image drops its old parallax mask and quality verdict.
+5. **Hands.** The prompt writer is told to give every person one simple, clear pose (hands resting, holding one object, at their
+   sides) and say what each hand does, and to avoid poses image models get wrong: spread-finger waves, pointing, interlocked
+   hands, hands near faces. A description that asks for a wave or a point gets its simplest version. This applies to prompts
+   written from now on; remove a scene's entry from `prompts.json` (or use `--regenerate`) to rewrite an older one.
+6. **Failures.** Network errors and rate limits are retried 3 times. If one shape fails, the other is cropped to fit. A scene that still
    fails gets a title card, and the run carries on; failed scenes are listed at the end. Rerun later to fill them in, since images that
    did succeed are cached.
+
+### Quality check (`--check-images`)
+```
+.venv\Scripts\python make_video.py Scripts\my_video.txt --generate-visuals --check-images
+```
+After each image is drawn, `@cf/meta/llama-4-scout-17b-16e-instruct` (natively multimodal, no licence step; `--vision-model` to
+change) looks at it, shrunk to 1024 px, with the shot it was meant to show, and answers in JSON: does any person or animal have an
+extra or missing arm, leg, hand or finger, a fused or floating limb, a distorted or extra face, and is there any lettering, logo or
+watermark? A failed image is redrawn with a new seed, up to **2 times**; then the best try (a pass, else the highest score) is kept,
+and the log ends with a `FLAGGED` line for each image that still failed, so you can look at it or `--redo-scenes` it.
+- **Cost:** about **40 neurons a check** at the published rates (the run prints the real total from the reported tokens), so ~1,500
+  for a 19-scene video's 38 images, plus a redraw (~132) and a check for each failure. `--check` estimates it.
+- **Verdicts are cached** next to each image (`generated/<image>.qc.json`) and saved in `prompts.json` under `"quality"`, so a
+  rerun doesn't pay to check the same picture twice. If the checker is unavailable (no allowance left) or its reply can't be read,
+  the image is kept unchecked and checked on the next run.
+- Vision models miss things and sometimes see problems that aren't there, so still look at the flagged scenes and a few others.
 
 ### Reviewing and editing prompts
 The prompt writer sees each scene's `Visuals:` description line (which decides what the image shows), its narration, the style,

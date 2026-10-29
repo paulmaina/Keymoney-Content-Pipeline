@@ -566,6 +566,14 @@ def parse_args(argv=None):
     ap.add_argument("--new-images", action="store_true",
                     help="keep the saved prompts but draw every image again with a new random seed "
                          "(the new images replace the cached ones)")
+    ap.add_argument("--redo-scenes", default="", metavar='"3,7"',
+                    help="draw only these scenes' images again with a new seed; every other scene keeps its cached "
+                         "images and prompts (turns on --generate-visuals)")
+    ap.add_argument("--check-images", action="store_true",
+                    help="look at every AI image with a Cloudflare vision model for extra or missing limbs, fingers or "
+                         "faces and stray text; failures are redrawn with a new seed up to 2 times, then the best is kept "
+                         "and flagged (~40 neurons a check)")
+    ap.add_argument("--vision-model", default=ai_visuals.VISION_MODEL, help="Workers AI model for --check-images")
     ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL,
                     help="Workers AI image model: a short name (" + ", ".join(ai_visuals.IMAGE_MODELS) +
                          ") or a full @cf/... ID (default flux-2-klein-4b, ~132 neurons an image, one per format)")
@@ -597,8 +605,17 @@ def parse_args(argv=None):
     if args.vertical:
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
-    args.generate_visuals |= args.prompts_only
+    args.redo = parse_scene_numbers(args.redo_scenes, ap)
+    args.generate_visuals |= args.prompts_only or bool(args.redo)
     return args
+
+
+def parse_scene_numbers(text, ap=None):
+    """{0-based index} from "3,7" (1-based, as --check and the log number scenes)."""
+    try:
+        return {int(n) - 1 for n in re.split(r"[,\s]+", text.strip()) if n} if text.strip() else set()
+    except ValueError:
+        (ap.error if ap else sys.exit)(f'--redo-scenes expects scene numbers like "3,7", got "{text}"')
 
 
 def main():
@@ -637,12 +654,16 @@ def main():
     formats = list(FORMATS) if args.format == "both" else [args.format]
     failed_visuals = []
     if args.generate_visuals:
+        if (bad := sorted(n + 1 for n in args.redo if not 0 <= n < len(scenes))):
+            sys.exit(f"--redo-scenes: there is no scene {', '.join(map(str, bad))} (the script has {len(scenes)})")
+        if (own := sorted(n + 1 for n in args.redo if scenes[n]["visual"])):
+            print(f"Note: scene(s) {', '.join(map(str, own))} use your own [visual:] file, so --redo-scenes skips them.")
         providers = ai_visuals.Providers(args.image_provider, args.image_model, args.text_model,
-                                         new_images=args.new_images)
+                                         new_images=args.new_images, vision_model=args.vision_model)
         failed_visuals = ai_visuals.generate_scene_visuals(
             scenes, base.with_name(base.name + "_prompts.json"), style=args.style, regenerate=args.regenerate,
             prompts_only=args.prompts_only, provider=args.image_provider, providers=providers,
-            characters=parse_characters(script), formats=formats)
+            characters=parse_characters(script), formats=formats, redo=args.redo, check=args.check_images)
         if args.prompts_only:
             print("Prompts only: review and edit the file above, then rerun with --generate-visuals.")
             return

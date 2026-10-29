@@ -16,7 +16,7 @@ WPM = {"edge": 135, "kokoro": 160}  # measured on the demo: edge ~134 wpm, kokor
 MAX_SENTENCES, MAX_WORDS, SENTENCE_WORDS = 3, 60, 40
 TARGET_SCENES = (15, 20)
 PREVIOUS_PROMPT_CHARS = 350  # a typical image prompt, passed as context to the next one
-PROMPT_OUT_TOKENS = 90
+PROMPT_OUT_TOKENS, CHECK_OUT_TOKENS = 90, 60
 # --upscale on Kaggle T4, measured on Script2 (Oct 2026): a 1.9 min session for 38 images at 1536x864 (2x),
 # ~0.6 min of install and weights plus 2.0 s per image; rounded up a little
 UPSCALE_SETUP_MIN, UPSCALE_SEC_PER_IMAGE = 1.0, 2.0
@@ -37,6 +37,11 @@ def speed(rate):
 def text_neurons(model, chars_in, tokens_out):
     rate_in, rate_out = ai_visuals.TEXT_NEURONS.get(model, ai_visuals.TEXT_NEURONS[ai_visuals.TEXT_MODEL])
     return (chars_in / 4 * rate_in + tokens_out * rate_out) / 1e6
+
+
+def check_neurons(model):
+    """One --check-images call: the checker's instructions, the image and a short JSON reply."""
+    return text_neurons(model, len(ai_visuals.QC_SYSTEM) + 300 + ai_visuals.QC_IMAGE_TOKENS * 4, CHECK_OUT_TOKENS)
 
 
 def seconds_label(s):
@@ -94,7 +99,9 @@ def analyse(script, args):
         notes.append(f"the style changed since {prompts_path.name} was written, so every prompt is written again")
     est = {"prompts_new": 0, "prompts_saved": 0, "prompts_redescribed": 0, "images_new": 0, "images_cached": 0,
            "neurons_prompts": 0.0, "neurons_images": 0.0, "sizes": sizes, "model": model_id,
-           "per_image": [model.neurons(*ai_visuals.dims(z)) for z in sizes], "upscale_todo": 0}
+           "per_image": [model.neurons(*ai_visuals.dims(z)) for z in sizes], "upscale_todo": 0, "checks": 0,
+           "neurons_checks": 0.0}
+    redo = getattr(args, "redo", set())
     sheet_chars = len(ai_visuals.sheet_text(sheet))
     for s, row in zip(scenes, rows):
         row["description"] = s["description"]
@@ -110,8 +117,10 @@ def analyse(script, args):
             for z in sizes:
                 full = ai_visuals.full_prompt(shot, args.style, z)
                 hit = next((p for m in cache_ids if (p := ai_visuals.image_path(full, m, z)).exists()), None)
-                if hit and not args.new_images:
+                if hit and not args.new_images and row["scene"] - 1 not in redo:
                     est["images_cached"] += 1
+                    if args.check_images and not ai_visuals.load_verdict(hit):
+                        est["checks"] += 1  # cached, but never checked
                     if args.upscale and not upscale_cached(hit):
                         est["upscale_todo"] += 1
                 else:
@@ -125,7 +134,10 @@ def analyse(script, args):
             chars = (len(ai_visuals.PROMPT_SYSTEM) + len(s["text"]) + len(s["description"]) + len(args.style)
                      + sheet_chars + PREVIOUS_PROMPT_CHARS)
             est["neurons_prompts"] += text_neurons(args.text_model, chars, PROMPT_OUT_TOKENS)
-    est["neurons_total"] = est["neurons_prompts"] + est["neurons_images"]
+    if args.check_images:  # one check per new image; failures cost a redraw and a check each, not counted here
+        est["checks"] += est["images_new"]
+        est["neurons_checks"] = est["checks"] * check_neurons(args.vision_model)
+    est["neurons_total"] = est["neurons_prompts"] + est["neurons_images"] + est["neurons_checks"]
     if args.upscale:  # new images are always under 2048 px, so each one goes to Kaggle once
         est["upscale_todo"] += est["images_new"]
     upscale_min = (UPSCALE_SETUP_MIN + est["upscale_todo"] * UPSCALE_SEC_PER_IMAGE / 60) if est["upscale_todo"] else 0
@@ -202,6 +214,9 @@ def report(script, args):
     else:
         print(f"  images:        {est['images_new']} new from {args.image_provider} (no Cloudflare neurons), "
               f"{est['images_cached']} cached")
+    if args.check_images:
+        print(f"  quality checks: {est['checks']} (~{est['neurons_checks']:.0f} neurons; each failed image adds a redraw "
+              f"and a check, up to {ai_visuals.QC_RETRIES} times)")
     print(f"  total about {est['neurons_total']:,.0f} of {ai_visuals.FREE_NEURONS_PER_DAY:,} free neurons a day")
     if est["neurons_total"] > ai_visuals.FREE_NEURONS_PER_DAY:
         print("  ! that's more than the free allowance: --image-model flux-2-klein-4b, or render one --format")

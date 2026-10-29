@@ -40,7 +40,7 @@ don't run it directly. Write `Scripts/<name>_voiceover.txt` in that format and l
 - Write numbers the way they should be spoken where TTS may stumble (e.g. "40 to 60 watt").
 
 Then **always run `--check` first** and show the user its report, with the options you'll render with:
-`.venv\Scripts\python make_video.py Scripts\<file>.txt --check --generate-visuals [--new-images] [--upscale]`
+`.venv\Scripts\python make_video.py Scripts\<file>.txt --check --generate-visuals [--new-images] [--check-images] [--upscale]`
 It lists scenes with words and estimated seconds, which get an AI image, a strong move or an own file, the skipped `#` comments,
 and the Cloudflare neuron, Kaggle GPU-time and render-time estimates. It flags paragraphs that are too long, missing `[visual:]`
 files and stray `[tags]`, and warns when the neurons exceed the free 10,000 a day. It needs no network or FFmpeg. Fix the flags first.
@@ -120,6 +120,17 @@ Always review prompts before spending image quota:
 - A real person is drawn as a representative figure from their description, not their actual likeness; say so if the user asks
   for "the real" person, and remind them about YouTube's synthetic-content label.
 - Failed scenes fall back to text cards and are listed at the end; rerun to retry them. If one shape fails, the other is cropped.
+- `--redo-scenes "3,7"` redraws just those scenes (both shapes, new seed, same prompt) and keeps everything else cached: use it when
+  the user dislikes a few images, or to replace Pollinations fallbacks with Cloudflare images. It turns on `--generate-visuals`.
+- Hands: the prompt writer gives every person one simple pose and says what each hand does (no spread-finger waves, pointing,
+  interlocked hands). Only new prompts get this; to apply it to an old prompt, delete that scene's entry from `prompts.json`.
+
+### Quality check (`--check-images`)
+- After each image, Llama 4 Scout (`--vision-model`) checks it for extra or missing limbs, fingers or faces and stray text.
+  A failure is redrawn with a new seed up to 2 times; then the best try is kept and a `FLAGGED` line is printed. Verdicts are
+  cached in `generated/<image>.qc.json` and `prompts.json` (`"quality"`), so reruns don't pay twice.
+- ~40 neurons a check (~1,500 for 38 images), plus ~132 + 40 per redraw. The run prints the real total; `--check` estimates it.
+- Always look at the FLAGGED scenes yourself and tell the user about them; the checker can miss or invent problems.
 
 ### Sharper images (`--upscale`, Real-ESRGAN on a free Kaggle T4)
 - Sends every scene image under 2048 px that isn't upscaled yet to Kaggle **in one batch**: one private dataset version and one
