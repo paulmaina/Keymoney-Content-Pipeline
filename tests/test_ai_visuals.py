@@ -45,6 +45,18 @@ class FakeAPI:
         return [p for m, p in self.calls if m != av.TEXT_MODEL]
 
 
+@pytest.fixture(autouse=True)
+def isolated_env(monkeypatch, tmp_path):
+    """Never read the real .env or call Pollinations for real."""
+    monkeypatch.setattr(av, "ENV_FILE", tmp_path / "no.env")
+    for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "POLLINATIONS_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    def no_network(*a, **k):
+        raise AssertionError("unexpected Pollinations call")
+    monkeypatch.setattr(av, "pollinations_run", no_network)
+
+
 @pytest.fixture
 def api(monkeypatch, tmp_path):
     fake = FakeAPI()
@@ -82,6 +94,32 @@ def test_cache_key_depends_on_prompt_model_and_size():
     assert base == av.image_path("a pot", "m1")
     assert len({base, av.image_path("a jar", "m1"), av.image_path("a pot", "m2"),
                 av.image_path("a pot", "m1", size="portrait")}) == 4
+
+
+def test_new_images_keeps_saved_prompts_but_draws_again(api, tmp_path):
+    prompts = tmp_path / "p.json"
+    first = scenes("One.", "Two.")
+    run(first, prompts)
+    api.calls.clear()
+    again = scenes("One.", "Two.")
+    av.generate_scene_visuals(again, prompts, providers=av.Providers("cloudflare", creds=CREDS, new_images=True))
+    assert api.text_calls() == []  # saved prompts reused
+    assert len(api.image_calls()) == 2  # cache skipped: both drawn again
+    # Workers AI rejects a seed for FLUX schnell; it varies the picture by itself (checked for real, Oct 2026)
+    assert all("seed" not in p for p in api.image_calls())
+    assert [s["src"] for s in again] == [s["src"] for s in first]  # the new images replace the cached ones
+    api.calls.clear()
+    run(scenes("One.", "Two."), prompts)  # a normal run afterwards reuses the new images
+    assert api.image_calls() == []
+
+
+def test_new_images_uses_a_random_pollinations_seed(api, tmp_path, monkeypatch):
+    seeds = []
+    monkeypatch.setattr(av, "pollinations_run",
+                        lambda prompt, key, seed, timeout=180: seeds.append(seed) or base64.b64decode(jpeg_b64()))
+    for new in (False, False, True):
+        av.Providers("pollinations", creds=CREDS, poll_key="sk_x", new_images=new).image("a pot", regenerate=True)
+    assert seeds[0] == seeds[1] == av.stable_seed("a pot") and seeds[2] != seeds[0]
 
 
 def test_regenerate_ignores_cache_and_saved_prompts(api, tmp_path):
@@ -133,13 +171,10 @@ def test_text_model_failure_falls_back_to_template(api, tmp_path):
     assert api.image_calls()[0]["prompt"].startswith(template + ", centered composition")
 
 
-def test_shot_notes_are_sent_to_prompt_writer_and_saved(api, tmp_path):
-    sc = scenes("Put one clay pot inside a bigger one.")
-    sc[0]["notes"] = "HACK 1 - Visuals: hands placing a small pot inside a larger one"
-    prompts = tmp_path / "p.json"
-    run(sc, prompts)
-    assert "Shot notes: HACK 1 - Visuals: hands placing" in api.text_calls()[0]["messages"][1]["content"]
-    assert json.loads(prompts.read_text(encoding="utf-8"))["scenes"][0]["notes"].startswith("HACK 1")
+def test_prompt_writer_is_never_told_about_shot_notes(api, tmp_path):
+    run(scenes("Put one clay pot inside a bigger one."), tmp_path / "p.json")
+    request = api.text_calls()[0]["messages"]
+    assert "shot note" not in json.dumps(request).lower()
 
 
 def test_prompts_only_writes_prompts_but_no_images(api, tmp_path):
@@ -167,12 +202,12 @@ def test_bad_image_payload_is_a_failure_not_a_crash(api, tmp_path, monkeypatch):
     assert run(sc, tmp_path / "p.json") == [1] and sc[0]["src"] is None
 
 
-def test_auth_error_stops_without_leaking_secrets(monkeypatch):
+def test_auth_error_stops_cloudflare_mode_without_leaking_secrets(monkeypatch):
     def reject(*a, **k):
-        raise av.CloudflareError("HTTP 403: Authentication error", auth=True)
+        raise av.CloudflareError("HTTP 403: Authentication error", auth=True, status=403)
     monkeypatch.setattr(av, "cf_run", reject)
     with pytest.raises(SystemExit) as e:
-        av.cf_call(av.IMAGE_MODEL, {"prompt": "x"}, CREDS)
+        av.Providers("cloudflare", creds=CREDS).image("a pot")
     assert "Workers AI" in str(e.value) and TOKEN not in str(e.value) and ACCOUNT not in str(e.value)
 
 
@@ -207,6 +242,117 @@ def test_credentials_load_from_env_file(monkeypatch, tmp_path):
     env.write_text(f"CLOUDFLARE_ACCOUNT_ID={ACCOUNT}\nCLOUDFLARE_API_TOKEN={TOKEN}\n", encoding="utf-8")
     monkeypatch.setattr(av, "ENV_FILE", env)
     assert av.credentials() == CREDS
+
+
+# ---------- provider fallback ----------
+
+class FakePollinations:
+    def __init__(self, fail=None):
+        self.prompts, self.fail = [], fail
+
+    def __call__(self, prompt, key, seed, timeout=180):
+        self.prompts.append(prompt)
+        if self.fail:
+            raise self.fail
+        return base64.b64decode(jpeg_b64())
+
+
+def quota_error():
+    return av.ProviderError("HTTP 429: 4006: you have used up your daily free allocation of 10,000 neurons",
+                            quota=True, status=429)
+
+
+def test_quota_exhausted_switches_to_pollinations_for_rest_of_run(api, tmp_path, monkeypatch):
+    def cf(model, payload, creds, timeout=120):
+        if model == av.TEXT_MODEL:  # a distinct prompt per scene, so nothing comes from the cache
+            return {"response": "prompt for " + payload["messages"][1]["content"][-8:]}
+        api.calls.append((model, payload))
+        raise quota_error()
+    monkeypatch.setattr(av, "cf_run", cf)
+    poll = FakePollinations()
+    monkeypatch.setattr(av, "pollinations_run", poll)
+    p = av.Providers("auto", creds=CREDS, poll_key="sk_test")
+    sc = scenes("One.", "Two.", "Three.")
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p) == []
+    assert len(api.calls) == 1  # Cloudflare tried once, then never again this run
+    assert len(poll.prompts) == 3 and all(s["src"].exists() for s in sc)
+    saved = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["scenes"]
+    assert {s["image_provider"] for s in saved} == {"pollinations"}
+
+
+def test_server_error_does_not_stop_cloudflare(api, tmp_path, monkeypatch):
+    errors = iter([av.ProviderError("HTTP 500", retryable=True, status=500)] * av.ATTEMPTS)
+
+    def cf(model, payload, creds, timeout=120):
+        if model == av.TEXT_MODEL:
+            return {"response": "p"}
+        api.calls.append(model)
+        if (e := next(errors, None)):
+            raise e
+        return {"image": jpeg_b64()}
+    monkeypatch.setattr(av, "cf_run", cf)
+    sc = scenes("One.", "Two.")
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("auto", creds=CREDS)) == [1]
+    assert sc[1]["src"].exists()  # scene 2 still went to Cloudflare
+
+
+def test_both_providers_failing_falls_back_to_title_cards(api, tmp_path, monkeypatch):
+    def cf(model, payload, creds, timeout=120):
+        if model == av.TEXT_MODEL:
+            return {"response": "p"}
+        raise quota_error()
+    monkeypatch.setattr(av, "cf_run", cf)
+    poll = FakePollinations(fail=av.ProviderError("HTTP 402", quota=True, status=402))
+    monkeypatch.setattr(av, "pollinations_run", poll)
+    sc = scenes("One.", "Two.")
+    failed = av.generate_scene_visuals(sc, tmp_path / "p.json",
+                                       providers=av.Providers("auto", creds=CREDS, poll_key="sk_test"))
+    assert failed == [1, 2] and all(s["src"] is None for s in sc)
+    assert len(poll.prompts) == 1  # Pollinations also stopped after its credit ran out
+
+
+def test_cached_image_from_any_provider_is_reused(api, tmp_path):
+    prompt = av.full_prompt("A pot", "")
+    av.save_image(base64.b64decode(jpeg_b64()), av.image_path(prompt, av.KAGGLE_CACHE_ID))
+    path, name, cached = av.Providers("cloudflare", creds=CREDS).image(prompt)
+    assert (name, cached) == ("kaggle", True) and api.image_calls() == []
+
+
+def test_kaggle_provider_never_calls_online_image_apis(api, tmp_path):
+    sc = scenes("One.")
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json",
+                                     providers=av.Providers("kaggle", creds=CREDS)) == [1]
+    assert api.image_calls() == [] and len(api.text_calls()) == 1
+
+
+def test_missing_all_credentials_in_auto_mode_explains_both(monkeypatch):
+    with pytest.raises(SystemExit) as e:
+        av.Providers("auto")
+    assert "Cloudflare" in str(e.value) and "POLLINATIONS_API_KEY" in str(e.value)
+
+
+def test_neuron_estimate_uses_reported_tokens(api, tmp_path, monkeypatch):
+    def cf(model, payload, creds, timeout=120):
+        if model == av.TEXT_MODEL:
+            return {"response": "p", "usage": {"prompt_tokens": 1_000, "completion_tokens": 100}}
+        return {"image": jpeg_b64()}
+    monkeypatch.setattr(av, "cf_run", cf)
+    p = av.Providers("cloudflare", creds=CREDS)
+    av.generate_scene_visuals(scenes("One."), tmp_path / "p.json", providers=p)
+    rate_in, rate_out = av.TEXT_NEURONS[av.TEXT_MODEL]
+    assert p.neurons == pytest.approx((1_000 * rate_in + 100 * rate_out) / 1e6 + av.FLUX_NEURONS)
+    assert av.FLUX_NEURONS == pytest.approx(57.6)
+
+
+def test_pollinations_errors_never_leak_key(monkeypatch):
+    monkeypatch.undo()  # use the real pollinations_run, with urlopen mocked
+    def fail(req, timeout=None):
+        assert "sk_SECRET" not in req.full_url  # the key goes in a header only
+        raise urllib.error.HTTPError(req.full_url, 402, "Payment Required", {}, io.BytesIO(b""))
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(av.ProviderError) as e:
+        av.pollinations_run("a pot", "sk_SECRET", 1)
+    assert e.value.quota and "sk_SECRET" not in str(e.value)
 
 
 # ---------- integration with make_video ----------

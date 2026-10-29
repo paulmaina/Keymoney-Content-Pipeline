@@ -1,4 +1,4 @@
-"""Unit tests for make_video.py. None of these need ffmpeg or network access."""
+﻿"""Unit tests for make_video.py. None of these need ffmpeg or network access."""
 from pathlib import Path
 
 import pytest
@@ -20,23 +20,32 @@ def test_parse_script_scenes_visuals_and_comments(tmp_path):
                  "# only a comment\n\n"
                  "[VISUAL:  pic one.png ]\nScene three.\n", encoding="utf-8")
     assert mv.parse_script(p) == [
-        {"text": "Hello there. Second line.", "visual": None, "notes": "a comment"},
-        {"text": "Scene two.", "visual": "clip.mp4", "notes": ""},
-        {"text": "Scene three.", "visual": "pic one.png", "notes": ""},
+        {"text": "Hello there. Second line.", "visual": None, "video": False, "description": ""},
+        {"text": "Scene two.", "visual": "clip.mp4", "video": False, "description": ""},
+        {"text": "Scene three.", "visual": "pic one.png", "video": False, "description": ""},
     ]
 
 
-def test_parse_script_collects_comment_lines_as_shot_notes(tmp_path):
+def test_comments_are_dropped_and_visuals_lines_become_the_description(tmp_path):
     p = tmp_path / "s.txt"
-    p.write_text("# HACK 1 - Visuals: market in harsh sun\n#\n# hands placing pots\nSpoken text.\n",
-                 encoding="utf-8")
-    assert mv.parse_script(p)[0]["notes"] == "HACK 1 - Visuals: market in harsh sun hands placing pots"
+    p.write_text("# HACK 1 - Visuals: market in harsh sun\n#\nSpoken one.\n   # indented note\nSpoken two.\n"
+                 "#no space after the hash\n# Shot: close-up of the pots\n", encoding="utf-8")
+    assert mv.parse_script(p) == [{"text": "Spoken one. Spoken two.", "visual": None, "video": False,
+                                   "description": "HACK 1 - Visuals: market in harsh sun; Shot: close-up of the pots"}]
+    assert [n for n, _ in mv.parse_comments(p)] == [2, 4, 6]  # plain comments only
+
+
+def test_only_labelled_lines_are_descriptions(tmp_path):
+    p = tmp_path / "s.txt"
+    p.write_text('# The "Visuals" notes say what footage each scene needs.\n# note: from the doc\n'
+                 "# Visuals:\nSpoken.\n", encoding="utf-8")  # no label, a different label, an empty label
+    assert mv.parse_script(p)[0]["description"] == ""
 
 
 def test_parse_script_ignores_utf8_bom(tmp_path):
     p = tmp_path / "s.txt"
     p.write_bytes("﻿# comment\nSpoken text.".encode("utf-8"))
-    assert mv.parse_script(p) == [{"text": "Spoken text.", "visual": None, "notes": "comment"}]
+    assert mv.parse_script(p) == [{"text": "Spoken text.", "visual": None, "video": False, "description": ""}]
 
 
 def test_parse_script_empty(tmp_path):

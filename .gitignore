@@ -12,3 +12,7 @@ generated/
 __pycache__/
 .pytest_cache/
 Exports/.work_*/
+Exports/.clips_*/
+Exports/*_video_job/
+Exports/*_video_job.zip
+Exports/*_kaggle/

@@ -1,4 +1,5 @@
 ﻿# Demo script - each paragraph becomes one scene.
+[video]
 Welcome to your new AI video studio. This video was made entirely from a text script.
 
 [visual: assets/demo/test_clip.mp4]
