@@ -1,6 +1,6 @@
 ---
 name: produce-video
-description: Turn a script in Scripts/ into finished narrated, captioned horizontal and vertical videos with make_video.py. Use when the user asks to make, render, produce or re-render a video from a script, convert a production document into a voiceover script, pick a voice or speed, prepare visuals for scenes (own footage, AI images, AI video clips on Kaggle), or export/import a Kaggle video job.
+description: Turn a script in Scripts/ into finished narrated, captioned horizontal and vertical videos with make_video.py. Use when the user asks to make, render, produce or re-render a video from a script, convert a production document into a voiceover script, pick a voice or speed, prepare visuals for scenes (own footage, AI images, AI video clips on Kaggle), export/import a Kaggle video job, or get YouTube titles, description, chapters, tags and a thumbnail for a render.
 ---
 
 # Produce a video from a script
@@ -39,6 +39,11 @@ Then **always run `--check` first** and show the user its report:
 It lists scenes with words and estimated seconds, video and visual scenes, the skipped `#` comments, and the Cloudflare
 neuron and Kaggle GPU-time estimates. It also flags paragraphs that are too long, missing `[visual:]` files, more than 6 video scenes and stray `[tags]`.
 It needs no network or FFmpeg. Fix the flags before rendering.
+
+**Before a full render of a new or changed script, suggest running the fact-check skill** (it writes
+`Research/<script>_factcheck.md` and never edits the script without asking). Do it before `--export-video-job` or
+`--kaggle-video` too: changing a `[video]` scene's narration afterwards breaks the clip-to-scene match. If the user
+declines, go ahead.
 
 The one command for everything is `make_video.py Scripts\<file>.txt --kaggle-video`: Kaggle clips for `[video]` scenes (skipped
 if there are none), Cloudflare images for the rest, and both videos rendered locally.
@@ -133,10 +138,33 @@ Run from the project root (not from Scripts/), in the background, since 20 scene
   They need internet; `--engine kokoro --voice am_michael` works offline.
 - `--format vertical` or `horizontal` renders only one; `--music <file>` adds ducked background music.
 
+### YouTube metadata and thumbnail (on by default)
+After rendering, `make_video.py` writes `Exports/<name>_youtube.md` and `Exports/<name>_thumbnail.jpg`; `--no-metadata` skips both.
+- The `.md` has 3 title options (under 60 characters, curiosity-driven but accurate, with counts), a ready-to-paste description (hook, summary, chapters,
+  a line saying whether visuals are AI-generated, hashtags), the chapters, and 10-15 tags.
+- Chapters use the real scene timings, grouped by all-caps section headings in the script: `# HOOK`, `# INTRO`,
+  `# HACK 1 NIGERIA - Visuals: ...`, `# OUTRO` (a heading applies until the next one; `HACK 1 NIGERIA` and `HACK 1` are one
+  chapter). YouTube needs the first at 0:00, at least 3, each 10+ seconds, so short sections merge into the previous one and
+  chapters are left out of videos under ~30 s or scripts without headings. When writing a `_voiceover.txt`, start each
+  `# ... - Visuals:` line with its section name so chapters work.
+- Titles, summary, tags and the thumbnail words come from one call to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
+  (`--metadata-model`), about 65 neurons; it prints an upper estimate first. The 3B and 8B models wrote false titles on
+  Script2, so don't switch to them to save neurons. Model titles and tags using words the narration doesn't are dropped, and
+  the description always opens with the narration's first lines. Without Cloudflare credentials, or if the reply isn't
+  usable, they're built from the script (first-line `# Title Case Title`, opening sentences, headings, character names);
+  such titles are marked "built from the script".
+- The thumbnail is 1280x720, under 2 MB, with 2-4 words of bold yellow text in the bundled font, on the most colourful and
+  contrasty scene picture (a frame for video scenes). If every scene is a title card it draws one FLUX image of the opening
+  scene (57.6 neurons, cached), else a plain gradient.
+- `--channel` sets the channel name (default Smart Village Boy).
+- Review the `.md` with the user: titles and description must stay within what the video says (fact-check them like the
+  script), and remind them to declare altered or synthetic content in YouTube Studio when AI scenes look realistic.
+
 ## 4. Check before handing over
 - `ffprobe` both outputs in `Exports/`: 1920x1080 and 1080x1920, each with an audio stream.
 - Read `Exports/<name>.srt` for caption problems, and grab a frame or two with
   `ffmpeg -ss <t> -i <mp4> -frames:v 1 <scratch png>` to look at the result.
 - With AI images, look at frames from several scenes in both formats: check the crop kept the subject and
   that people are depicted respectfully.
+- Look at `Exports/<name>_thumbnail.jpg` and read `Exports/<name>_youtube.md` (titles, chapters, tags).
 - Tell the user the output paths, the duration, and which scenes still use text cards or fallback footage.

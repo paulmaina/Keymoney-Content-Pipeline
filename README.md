@@ -7,6 +7,8 @@ Turn a text script into narrated, captioned videos ready for social media. One r
 | `Exports/<name>_horizontal.mp4` | 1920x1080 | YouTube, Facebook |
 | `Exports/<name>_vertical.mp4` | 1080x1920 | Instagram Reels, TikTok, YouTube Shorts |
 | `Exports/<name>.srt` | | Caption file (same timings for both videos) |
+| `Exports/<name>_youtube.md` | | Title options, description with chapters, and tags ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
+| `Exports/<name>_thumbnail.jpg` | 1280x720 | YouTube thumbnail with 2–4 words of bold text |
 
 The voice over and captions are generated once and shared by both videos.
 
@@ -130,6 +132,9 @@ Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the f
 | `--no-captions` | Don't burn in captions (the `.srt` is still useful for YouTube's caption upload) |
 | `--whisper-model small` | More accurate caption timing, but slower |
 | `--caption-words 4` | Fewer words per caption line |
+| `--no-metadata` | Don't write `<name>_youtube.md` and `<name>_thumbnail.jpg` after rendering |
+| `--metadata-model @cf/...` | Workers AI model for the YouTube titles, description and tags (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, ~65 neurons) |
+| `--channel "My Channel"` | Channel name used in the YouTube metadata (default Smart Village Boy) |
 
 `--vertical` still works as a deprecated alias for `--format vertical`.
 
@@ -141,6 +146,52 @@ Examples:
 
 Voices: run `.venv\Scripts\edge-tts --list-voices` for the online ones (e.g. `en-US-AndrewNeural`, `en-GB-SoniaNeural`).
 Offline Kokoro voices include `af_heart`, `af_bella`, `am_michael`, `bf_emma` and `bm_george`.
+
+### YouTube metadata and thumbnail
+After rendering, two upload helpers are written next to the videos (`--no-metadata` skips them):
+- **`Exports/<name>_youtube.md`**: 3 curiosity-driven title options under 60 characters (no clickbait), a ready-to-paste description (hook, short summary,
+  chapters, a line saying whether the visuals are AI-generated, hashtags), the chapters on their own, and 10–15 tags.
+- **`Exports/<name>_thumbnail.jpg`**: 1280x720, under 2 MB, with 2–4 words of bold text in the bundled font, on the most colourful
+  and contrasty scene picture. If every scene is a title card it draws one FLUX image (57.6 neurons, cached), or uses a plain gradient.
+
+**Chapters** come from the real scene timings, grouped by all-caps section headings in the script. A heading applies to its
+paragraph and the following ones until the next heading, and `HACK 1 NIGERIA` and `HACK 1` count as the same chapter:
+```
+# HOOK - Visuals: clay pot in desert sun
+No electricity. No fridge. No running water.
+
+# HACK 1 NIGERIA - Visuals: Sahel village market in harsh sun
+In northern Nigeria, heat can spoil vegetables in just a few days.
+```
+gives `0:00 Hook`, then `Hack 1: Nigeria` at its real start time. YouTube shows chapters only when the first is at 0:00, there are
+at least 3, and each lasts at least 10 seconds, so shorter sections merge into the one before. Scripts without headings, and
+videos under about 30 seconds, get no chapters (the `.md` says why).
+
+**Titles, summary, tags and thumbnail words** come from one call to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, about
+65 neurons (the run prints an upper estimate first). On Script2 the cheaper 3B and 8B models kept writing titles the narration
+contradicts, such as "collect rainwater" for fog nets, so the 70B is the default; `--metadata-model` changes it. The model is
+told to use only facts from the narration, and its titles and tags are dropped if they use words the narration doesn't
+(apart from generic ones like "clever" or "hacks"), as are clickbait phrases and exclamation marks. The description always
+opens with the narration's own first lines. Without Cloudflare credentials, or if the reply isn't usable, everything is built
+from the script instead: a Title Case `# title` on the first line, the opening sentences, the headings and character names.
+Titles that came from the script are marked in the `.md`. Always read them before uploading.
+
+## Research and fact-checking
+Two Claude Code skills in `.claude/skills/` help before you write and before you render:
+- **research-topic**: give it a topic ("water storage village hacks"). It runs `research.py` to find 10–20 top YouTube videos
+  and their transcripts (no API key, using `youtube-transcript-api`), then writes `Research/<topic>.md`: what the videos cover
+  and miss, common hooks and title patterns, and 5 topic ideas for the channel with the gap each fills. Transcripts are saved in
+  `Research/_raw/` (gitignored) for analysis only; the report never copies their wording.
+  ```
+  .venv\Scripts\python research.py "water storage village hacks" --max 15
+  .venv\Scripts\python research.py "topic" --ids "https://youtu.be/...,https://youtu.be/..." --no-search
+  ```
+  Videos without captions are noted. If YouTube blocks your IP it stops fetching and keeps what it has; rerun later
+  (saved transcripts are reused).
+- **fact-check**: give it a script in `Scripts\`. It lists every factual claim (places, people, dates, numbers, how a hack works,
+  safety or health claims), checks each against 1–2 independent web sources, and writes `Research/<script>_factcheck.md` with
+  confirmed / unclear / unsupported verdicts, links, and softer wording for anything not confirmed. It never edits the script
+  without asking. Run it before a full render.
 
 ## AI-generated visuals
 `--generate-visuals` draws an image for every scene that has no `[visual:]` line. Scenes with a `[visual:]` line always keep your file.
@@ -342,8 +393,9 @@ SDXL reads only the first 77 tokens of each prompt, so put the most important de
 .venv\Scripts\python -m pytest
 ```
 The tests cover script parsing (including `[video]`/`[visual:]` tags and character lines), `--check`, `make_video.toml` defaults, the character sheet,
-caption timing and alignment, AI image providers and their fallbacks, video-job export, clip import, clip-fill timing and the Kaggle runner.
-All Cloudflare and Pollinations calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that `kaggle/wan_video.ipynb`
+caption timing and alignment, AI image providers and their fallbacks, video-job export, clip import, clip-fill timing, the Kaggle runner,
+YouTube metadata (chapters, title and tag limits, the thumbnail) and `research.py` (search parsing, missing captions, IP blocks).
+All Cloudflare, Pollinations, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that `kaggle/wan_video.ipynb`
 matches `kaggle/wan_video.py`. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
 
 ## Credits

@@ -390,3 +390,10 @@ def test_cli_options():
     assert (a.generate_visuals, a.style, a.regenerate, a.image_model) == (True, "warm", True, "@cf/x/y")
     a = mv.parse_args(["s.txt", "--prompts-only"])
     assert a.prompts_only and a.generate_visuals
+
+
+def test_text_returns_json_text_when_the_reply_arrives_parsed(monkeypatch):
+    # llama-3.3-70b's JSON replies come back as an object in "response", not a string
+    monkeypatch.setattr(av, "cf_call", lambda model, payload, creds: {"response": {"titles": ["Fog Nets in Chile"]}})
+    p = av.Providers("cloudflare", creds=CREDS, poll_key="")
+    assert json.loads(p.text([{"role": "user", "content": "x"}])) == {"titles": ["Fog Nets in Chile"]}
