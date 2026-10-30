@@ -93,8 +93,9 @@ one `--format` if the budget is tight. The allowance resets at 00:00 UTC.
 `--image-provider`:
 - `auto` (default): Cloudflare, switching to Pollinations (FLUX.1 schnell, at the same sizes) for the rest of the run once
   Cloudflare's daily allowance (or a persistent 429) stops it; title cards if both fail. Tell the user which scenes fell back:
-  they look less realistic.
-- `cloudflare`, `pollinations`: only that one.
+  they look less realistic. Prompts then come from Pollinations' text model (the key must allow text models), and
+  `--check` estimates how many scenes will fall back (from `generated/cloudflare_usage.json`).
+- `cloudflare`, `pollinations`: only that one. `make_video.toml` sets `image-provider = "auto"`.
 Every provider shares the `generated/` cache, and a cached image from any provider is reused (including a Pollinations fallback;
 to redraw those with Cloudflare, delete their files from `generated/` — the log lists them — and rerun without `--new-images`).
 

@@ -110,11 +110,14 @@ def analyse(script, args):
            "neurons_checks": 0.0}
     redo = getattr(args, "redo", set())
     sheet_chars = len(ai_visuals.sheet_text(sheet))
-    for s, row in zip(scenes, rows):
+    scene_cost = {}  # 0-based scene: its Cloudflare neurons (prompt, images, checks; second shot added below)
+    for i, (s, row) in enumerate(zip(scenes, rows)):
         row["description"] = s["description"]
         row["kind"] = "own file" if s["visual"] else "image"
         if s["visual"]:
             continue
+        before = (est["neurons_prompts"] + est["neurons_images"], est["images_new"], est["checks"])
+        scene_cost[i] = 0.0
         prompt = ai_visuals.saved_prompt(saved, s)
         if s["text"] in saved and not prompt:
             est["prompts_redescribed"] += 1  # saved, but written before this description line existed or changed
@@ -141,8 +144,15 @@ def analyse(script, args):
             chars = (len(ai_visuals.PROMPT_SYSTEM) + len(s["text"]) + len(s["description"]) + len(args.style)
                      + sheet_chars + PREVIOUS_PROMPT_CHARS)
             est["neurons_prompts"] += text_neurons(args.text_model, chars, PROMPT_OUT_TOKENS)
+        checked = (est["images_new"] - before[1] + est["checks"] - before[2]) if args.check_images else 0
+        scene_cost[i] = (est["neurons_prompts"] + est["neurons_images"] - before[0]
+                         + checked * check_neurons(args.vision_model))
     two = second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cache_ids, cloudflare_images)
+    for i, (neurons, images) in two.pop("per_scene").items():
+        scene_cost[i] = scene_cost.get(i, 0.0) + neurons + (images * check_neurons(args.vision_model)
+                                                           if args.check_images else 0)
     est.update(two)
+    est["fallback"] = fallback_plan(scene_cost, args)
     if args.check_images:  # one check per new image; failures cost a redraw and a check each, not counted here
         est["checks"] += est["images_new"]
         est["neurons_checks"] = est["checks"] * check_neurons(args.vision_model)
@@ -176,12 +186,13 @@ def second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cac
     """--two-shots: scenes over 6 s get a second image; its prompt and images count unless already saved and cached.
     Stock scenes won't need one, so this is the most it can cost."""
     two = mv.two_shot_scenes(scenes, args)
-    out = {"second_scenes": 0, "second_prompts_new": 0, "second_images_new": 0, "neurons_second": 0.0}
+    out = {"second_scenes": 0, "second_prompts_new": 0, "second_images_new": 0, "neurons_second": 0.0, "per_scene": {}}
     for i in sorted(two):
         s = scenes[i]
         if s["visual"]:
             continue
         out["second_scenes"] += 1
+        start = (out["neurons_second"], out["second_images_new"])
         rec = saved.get(s["text"]) or {}
         prompt = ai_visuals.saved_prompt(saved, s)
         prompt2 = rec.get("prompt2") if prompt and rec.get("prompt2_for") == prompt else None
@@ -196,7 +207,38 @@ def second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cac
                 continue
             out["second_images_new"] += 1
             out["neurons_second"] += model.neurons(*ai_visuals.dims(z)) if cloudflare_images else 0
+        out["per_scene"][i] = (out["neurons_second"] - start[0], out["second_images_new"] - start[1])
     return out
+
+
+def fallback_plan(scene_cost, args):
+    """Which scenes will likely be made after Cloudflare's allowance runs out: their prompts are then written by
+    Pollinations' text model and their images drawn by Pollinations (image-provider auto with a key), or they get
+    title cards. Walks the scenes in order against the neurons this PC hasn't spent today (an upper bound: other use
+    of the account isn't counted)."""
+    left = ai_visuals.neurons_left()
+    spent, late = 0.0, []
+    for i in sorted(scene_cost):
+        if scene_cost[i] <= 0:
+            continue  # cached: nothing to make
+        spent += scene_cost[i]
+        if spent > left:
+            late.append(i + 1)
+    key = bool(ai_visuals.pollinations_key())
+    to = ("Pollinations" if args.image_provider == "auto" and key else
+          "title cards (no POLLINATIONS_API_KEY)" if args.image_provider == "auto" else "title cards")
+    return {"left": left, "refused": ai_visuals.usage_today()["refused"], "scenes": late, "to": to}
+
+
+def scene_list(numbers):
+    """[3, 4, 5, 9] -> '3-5, 9'."""
+    runs = []
+    for n in numbers:
+        if runs and n == runs[-1][1] + 1:
+            runs[-1][1] = n
+        else:
+            runs.append([n, n])
+    return ", ".join(f"{a}-{b}" if b > a else str(a) for a, b in runs)
 
 
 def video_range(n):
@@ -321,7 +363,7 @@ def report(script, args):
         print(f"  images:        {est['images_new']} new from {args.image_provider} (no Cloudflare neurons), "
               f"{est['images_cached']} cached")
     if args.check_images:
-        print(f"  quality checks: {est['checks']} (~{est['neurons_checks']:.0f} neurons; each failed image adds a redraw "
+        print(f"  quality checks: {est['checks'] + est['second_images_new']} (~{est['neurons_checks']:.0f} neurons; each failed image adds a redraw "
               f"and a check, up to {ai_visuals.QC_RETRIES} times)")
     if est["second_scenes"]:
         print(f"  second shots:  {est['second_scenes']} scene(s) over {mv.TWO_SHOT_SECONDS:.0f} s, "
@@ -331,6 +373,13 @@ def report(script, args):
         shorts_note = f", incl. {len(a['parts'])} Shorts" if len(a["parts"]) > 1 else ""
         print(f"  YouTube notes:  ~{est['neurons_meta']:.0f} neurons{shorts_note}")
     print(f"  total about {est['neurons_total']:,.0f} of {ai_visuals.FREE_NEURONS_PER_DAY:,} free neurons a day")
+    fb = est["fallback"]
+    if args.image_provider == "pollinations":
+        print("  image provider: pollinations (no Cloudflare neurons for images)")
+    elif fb["scenes"]:
+        left = "Cloudflare refused earlier today" if fb["refused"] else f"~{fb['left']:,.0f} neurons left today by this PC's count"
+        print(f"  ! after the allowance runs out ({left}), about {len(fb['scenes'])} scene(s) would fall back to "
+              f"{fb['to']}: {scene_list(fb['scenes'])}")
     if est["days"] > 1:
         print(f"  ! this needs about {est['days']} days of Cloudflare's free allowance. Run the same command with "
               "--visuals-only once a day (each day's images are cached) until --check shows 0 new images, then render.")

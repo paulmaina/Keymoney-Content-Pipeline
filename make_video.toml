@@ -12,6 +12,8 @@ chatterbox-cfg = 0.5       # ~0.3 keeps the pace natural at high emotion
 # chatterbox-voice = "voices/my_voice.wav"   # optional reference clip: only a voice you have the right to use
 voice = "en-US-EmmaMultilingualNeural"  # the Edge voice: used with engine = "edge", and if Chatterbox fails
 rate = "+5%"
+image-provider = "auto"  # auto = Cloudflare, then Pollinations (images and prompts) once the allowance runs out;
+                         # or "cloudflare" (title cards when it runs out) / "pollinations" (no Cloudflare images)
 media = "mixed"      # mixed = stock footage where it matches well, else AI images; "stock" or "ai"
 stock = "auto"       # auto = Pexels and Pixabay, whichever has a key in .env; or "pexels" / "pixabay"
 caption-style = "auto"  # auto = bold for vertical, clean for horizontal; or "bold" / "clean" / "minimal" for both

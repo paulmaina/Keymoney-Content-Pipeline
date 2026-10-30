@@ -34,7 +34,8 @@ README.md has the full detail on every feature. Keep this file up to date whenev
                                   not kaggle.json). Kaggle may ask you to verify your phone for GPU + internet.
        PIXABAY_API_KEY=           pixabay.com/api/docs/ (sign in; the key is shown on the page)
        PEXELS_API_KEY=            pexels.com/api/ (optional; used automatically once it's there)
-       POLLINATIONS_API_KEY=      optional image fallback, enter.pollinations.ai (starts with sk_)
+       POLLINATIONS_API_KEY=      optional fallback for images and prompts when Cloudflare runs out,
+                                  enter.pollinations.ai (starts with sk_). Allow the key to use text models there too.
 
    What each is for:
        Cloudflare  image prompts, AI images, the image quality check, stock scoring, YouTube titles/description
@@ -246,8 +247,13 @@ Pixabay: 100 searches a minute. Pexels: 200 an hour. Searches are cached for 24 
 reruns don't search again.
 
 When the Cloudflare allowance runs out:
-    - The run carries on: images come from Pollinations if POLLINATIONS_API_KEY is set, else those scenes become text
-      cards. Prompts fall back to simple ones built from the scene text.
+    - image-provider = "auto" (the default in make_video.toml): the run carries on with Pollinations for both the images
+      and the prompts (its text model writes the same detailed prompts), if POLLINATIONS_API_KEY is set; else those
+      scenes become text cards. Other options: --image-provider cloudflare (title cards when it runs out) or
+      --image-provider pollinations (no Cloudflare images at all).
+    - --check says how many scenes will likely fall back ("about 5 scene(s) would fall back to Pollinations: 15-19"),
+      from the neurons this PC has spent today (generated\cloudflare_usage.json).
+    - Images made while Cloudflare is out aren't quality-checked (the check needs Cloudflare).
     - Better: stop, wait until 03:00 Nairobi, and rerun the same command. Everything already made is cached, so it
       continues where it stopped.
     - Long scripts: --check says how many days the images need (an 8-10 minute video is about 2-3 days). Run
@@ -313,6 +319,10 @@ research.py stops with "blocked"
 The video looks too busy, or a scene's overlay or sound is wrong
     Turn a feature off in make_video.toml (overlays, camera = "calm", depth = "subtle", sound-effects) and compare with
     --preview-scenes. Overlays and sounds come from the scene's # Visuals line: reword it (for example, remove "misty").
+
+"Pollinations text refused (this key isn't allowed to use Pollinations' text models ...)"
+    On enter.pollinations.ai, open your key and allow text models. Until then, prompts written while Cloudflare is out
+    are simple stand-ins (rewritten properly on the next run), and Pollinations still draws the images.
 
 An error mentioning cv2 / OpenCV
     .venv\Scripts\python -m pip install -r requirements.txt   (OpenCV must stay below version 5).
