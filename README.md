@@ -214,7 +214,10 @@ script split into parts of **under 2:50 each, including the intro and outro**, s
 - **`_youtube.md`** gets a section per part: Shorts titles ending "(Part 2/5)", a description without chapters that links to the
   full video (replace `FULL_VIDEO_LINK` after uploading it) and tags. Each part's notes are one more text-model call (~95
   neurons, upper estimate).
-- With `--renderer ffmpeg` the parts are cut from the full vertical video, without the part badge or intro.
+- **Captions:** each part also gets its own `<name>_vertical_partN.srt`, with only its words, timed from 0:00 plus its intro,
+  for uploading with that Short (the captions are burned in too).
+- With `--renderer ffmpeg` the parts are cut from the full vertical video, without the part badge or intro. Its scenes are
+  encoded to whole frames on one shared timeline, so every cut lands on a scene's first picture.
 
 Preview or tweak the design with `npx remotion studio` in `remotion/` (the colours are in `remotion/src/theme.ts`). Remotion is free
 for individuals and small companies; see [remotion.dev/license](https://www.remotion.dev/license).

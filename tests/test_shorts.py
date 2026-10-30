@@ -221,3 +221,72 @@ def test_each_part_gets_titles_description_and_tags_linking_the_full_video(tmp_p
     assert "Next: Part 2." in metas[0]["description"] and "Next: Part" not in metas[1]["description"]
     md = ym.shorts_markdown(tmp_path / "vid", metas, "Village Water Hacks")
     assert "## Shorts series: 2 parts" in md and "vid_vertical_part2.mp4" in md and "Related video" in md
+
+
+# ---------- review fixes: frame timeline, per-part subtitles, voice checks ----------
+
+def test_frame_edges_never_drift_from_the_narration():
+    durs = [1.01] * 30  # each scene alone would round to 30 frames (1.000 s): 0.3 s of drift over 30 scenes
+    edges = mv.frame_edges(durs)
+    assert edges[-1] == round(30.3 * mv.FPS) == 909
+    assert all(abs(e / mv.FPS - 1.01 * i) <= 0.5 / mv.FPS + 1e-9 for i, e in enumerate(edges))  # within half a frame
+    assert {b - a for a, b in zip(edges, edges[1:])} == {30, 31}
+
+
+def test_ffmpeg_scenes_are_encoded_to_the_frames_the_cuts_use(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mv, "run", lambda cmd, cwd=None: calls.append([str(c) for c in cmd]) or "")
+    img = tmp_path / "a.png"
+    img.write_bytes(b"x")
+    scenes = [{"text": "x", "dur": 1.01, "visual": None, "src": str(img), "srcs": {}} for _ in range(30)]
+    monkeypatch.setattr(mv, "scene_src", lambda s, fmt: img)
+    args = SimpleNamespace(music=None)
+    monkeypatch.setattr(mv, "mux", lambda *a, **k: tmp_path / "v.mp4")
+    (tmp_path / "w").mkdir()
+    mv.render_format("vertical", scenes, tmp_path / "w", tmp_path / "n.wav", None, tmp_path / "f.ttf", args,
+                     tmp_path / "v.mp4")
+    frames = [int(c[c.index("-frames:v") + 1]) for c in calls if "-frames:v" in c]
+    assert len(frames) == 30 and "-t" not in calls[0] and sum(frames[:15]) == mv.frame_edges([1.01] * 30)[15]
+    calls.clear()
+    video = tmp_path / "vid_vertical.mp4"
+    video.write_bytes(b"x")
+    mv.cut_parts(video, scenes, [(0, 15), (15, 30)], tmp_path / "vid")
+    ss = float(calls[1][calls[1].index("-ss") + 1])
+    assert ss == pytest.approx(sum(frames[:15]) / mv.FPS, abs=0.001)  # part 2 opens exactly on scene 16's first frame
+
+
+def test_each_short_gets_its_own_retimed_srt(tmp_path):
+    W = mv.Word
+    scenes = [{"dur": d} for d in (10.0, 12.0, 11.0)]
+    chunks = [[W("No", 0.1, 0.4), W("fridge.", 0.5, 0.9)], [W("In", 10.2, 10.4), W("Kenya,", 10.5, 11.0)],
+              [W("In", 22.3, 22.5), W("Iran,", 22.6, 23.0)]]
+    lead = (rr.INTRO - rr.TRANSITION // 2) / mv.FPS
+    one, two = mv.write_part_srts(chunks, scenes, [(0, 2), (2, 3)], tmp_path / "vid", "remotion", lead)
+    assert (one.name, two.name) == ("vid_vertical_part1.srt", "vid_vertical_part2.srt")
+    text = two.read_text(encoding="utf-8")
+    assert text.startswith(f"1\n{mv.srt_time(0.3 + lead)} --> {mv.srt_time(1.0 + lead)}\nIn Iran,")
+    assert "Kenya" not in text and "fridge" not in text
+    assert "No fridge." in one.read_text(encoding="utf-8") and "Iran" not in one.read_text(encoding="utf-8")
+    # the ffmpeg renderer: no intro, and the part starts on its frame boundary
+    flat = mv.write_part_srts(chunks, [{"dur": 1.01}] * 22 + [{"dur": 11.0}], [(0, 22), (22, 23)], tmp_path / "f",
+                              "ffmpeg", 0.0)
+    start = mv.frame_edges([1.01] * 22 + [11.0])[22] / mv.FPS
+    assert flat[1].read_text(encoding="utf-8").startswith(f"1\n{mv.srt_time(22.3 - start)}")
+
+
+def test_visuals_only_never_needs_the_voice_model(tmp_path, monkeypatch):
+    import ai_visuals
+    import stock
+    p = script(tmp_path, [("HOOK", "No fridge here.")])
+    drawn = []
+    monkeypatch.setattr(mv, "check_ffmpeg", lambda: None)
+    monkeypatch.setattr(mv, "check_kokoro_model", lambda: pytest.fail("voice model checked before the images"))
+    monkeypatch.setattr(rr, "available", lambda: (True, ""))
+    monkeypatch.setattr(ai_visuals, "Providers", lambda *a, **k: None)
+    monkeypatch.setattr(stock, "fill_stock", lambda *a, **k: {})
+    monkeypatch.setattr(stock, "write_media_json", lambda *a, **k: None)
+    monkeypatch.setattr(ai_visuals, "generate_scene_visuals", lambda *a, **k: drawn.append(1) or [])
+    monkeypatch.setattr(mv.sys, "argv", ["make_video.py", str(p), "--visuals-only", "--engine", "kokoro",
+                                         "-o", str(tmp_path / "out" / "v")])
+    mv.main()
+    assert drawn == [1]
