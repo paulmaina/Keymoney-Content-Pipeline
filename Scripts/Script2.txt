@@ -1,5 +1,4 @@
 # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
-# character: Sonam Wangchuk = Ladakhi engineer in his late fifties, short greying hair, weathered face, wearing a traditional maroon Ladakhi wool robe tied with a sash
 # note: No topic was pasted, so this script uses the five village hacks story from Script 1.
 
 # Visuals: Smart Village Boy running up a dusty Kenyan hilltop at sunrise, reaching out to spin a large wooden globe on a stand, with mud houses and acacia trees behind him.
@@ -41,7 +40,7 @@ The drops trickle down into gutters and tanks. Some nets collect hundreds of lit
 # Visuals: Two farmers in thick woollen clothes standing beside a dry stone irrigation channel in a frozen Himalayan valley in Ladakh, India, on a winter afternoon, with snowy mountains behind.
 High in the Himalayas, the farmers of Ladakh face a cruel problem. Spring is when their crops need water most, and that is exactly when it runs short.
 
-# Visuals: Sonam Wangchuk standing in the snow in a Ladakh valley on a freezing winter night, opening a valve on a pipe as a fountain of water sprays upward and freezes onto a tall cone of ice.
+# Visuals: A Ladakhi engineer in his late fifties with short greying hair, wearing a traditional maroon Ladakhi wool robe tied with a sash, standing in the snow in a Ladakh valley on a freezing winter night, opening a valve on a pipe as a fountain of water sprays upward and freezes onto a tall cone of ice.
 [video] Engineer Sonam Wangchuk piped meltwater downhill and sprayed it into the freezing air. It froze into a towering cone of ice called an ice stupa.
 
 # Visuals: A tall ice cone melting slowly under clear blue sky in the Ladakh valley on a sunny spring morning, with a stream of water running from its base into green barley fields.
