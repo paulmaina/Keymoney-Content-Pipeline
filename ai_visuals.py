@@ -900,10 +900,40 @@ def load_prompt_file(path):
         return {}
 
 
+def scene_id(text, n=1):
+    """A scene's stable id: its narration's hash and which occurrence of that narration it is (1, 2, ...). It survives
+    reordering the script, and two scenes with the same narration get their own ids, prompts and edits."""
+    return f"{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}-{n}"
+
+
+def assign_ids(scenes):
+    """Set s["id"] on every scene of a script (all of them, so a scene's occurrence number never depends on which
+    scenes a run draws)."""
+    seen = {}
+    for s in scenes:
+        seen[s["text"]] = seen.get(s["text"], 0) + 1
+        s["id"] = scene_id(s["text"], seen[s["text"]])
+    return scenes
+
+
+def migrate_records(records):
+    """Give prompt records saved before ids existed (keyed by narration) their id, numbering repeated narration in
+    scene order. Every other field, including the user's edited prompts, is kept as it is."""
+    seen = {}
+    for r in sorted((r for r in records if isinstance(r, dict)), key=lambda r: r.get("scene") or 0):
+        text = r.get("narration")
+        if isinstance(text, str):
+            seen[text] = seen.get(text, 0) + 1
+            r.setdefault("id", scene_id(text, seen[text]))
+    return records
+
+
 def load_prompt_records(path):
-    """Saved prompt records keyed by narration, so edits survive reordering the script."""
+    """Saved prompt records keyed by scene id (see scene_id), so edits survive reordering the script and repeated
+    narration keeps one record per scene. Files from before ids are migrated as they're read."""
     try:
-        return {s["narration"]: s for s in load_prompt_file(path)["scenes"] if s.get("prompt")}
+        return {s["id"]: s for s in migrate_records(list(load_prompt_file(path)["scenes"]))
+                if isinstance(s, dict) and s.get("prompt") and s.get("id")}
     except (KeyError, TypeError, AttributeError):
         return {}
 
@@ -913,9 +943,11 @@ def load_prompts(path):
 
 
 def saved_prompt(records, scene):
-    """The saved prompt for a scene, if it was written for the same narration and visual description.
+    """The saved prompt for a scene (by its id), if it was written for the same narration and visual description.
     A new or edited description line means the prompt is written again."""
-    rec = records.get(scene["text"])
+    rec = records.get(scene.get("id") or scene_id(scene["text"]))
+    if rec and rec.get("narration", scene["text"]) != scene["text"]:
+        rec = None
     if rec and rec.get("description", "") == scene.get("description", "") and not rec.get("stand_in"):
         return rec["prompt"]
     return None
@@ -1026,12 +1058,16 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     if fresh and not regenerate:
         print(f"  the style changed since {prompts_path.name} was written: writing new prompts and character "
               "descriptions for it (your '# character:' lines are kept)")
+    assign_ids(scenes)
     saved = {} if fresh else load_prompt_records(prompts_path)
     # scenes of this script not drawn this run (stock, own files, outside a preview) keep their saved records;
-    # records for narration the script no longer has are dropped
-    others = {s["text"] for s in scenes} - {s["text"] for _, s in targets}
-    kept = [] if fresh else [r for r in load_prompt_file(prompts_path).get("scenes", [])
-                             if isinstance(r, dict) and r.get("narration") in others]
+    # records for scenes the script no longer has are dropped
+    others = {s["id"] for s in scenes} - {s["id"] for _, s in targets}
+    kept = [] if fresh else [r for r in migrate_records(list(load_prompt_file(prompts_path).get("scenes", [])))
+                             if isinstance(r, dict) and r.get("id") in others]
+    numbers = {s["id"]: n for n, s in enumerate(scenes, 1)}
+    for r in kept:  # a kept record follows its scene when the script is reordered
+        r["scene"] = numbers[r["id"]]
     sheet = build_sheet(characters, {} if fresh else load_characters(prompts_path))
     sizes = providers.sizes(formats)
     shapes = " + ".join("x".join(map(str, dims(z))) for z in sizes)
@@ -1044,9 +1080,9 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     for i, s in targets:
         description = s.get("description", "")
         prompt = saved_prompt(saved, s)
-        rec = {"scene": i + 1, "description": description, "narration": s["text"]}
+        rec = {"scene": i + 1, "id": s["id"], "description": description, "narration": s["text"]}
         if prompt:
-            old = saved[s["text"]]
+            old = saved[s["id"]]
             if old.get("prompt2") and old.get("prompt2_for") == prompt:  # a second shot written for this same prompt
                 rec.update(prompt2=old["prompt2"], prompt2_for=prompt)
         else:

@@ -1,5 +1,6 @@
 # Runs on every pull request and on main. No secrets: the tests mock Cloudflare, Kaggle, Pexels and Pixabay, so CI never
-# uses the free allowances. Real renders stay local (they need Remotion's browser, models and Cloudflare).
+# uses the free allowances. The smoke job renders one tiny video for real (FFmpeg and Remotion, offline: synthetic
+# narration, local pictures, branding clips), checking both orientations, their lengths, captions and the Upload manifest.
 name: CI
 
 on:
@@ -30,6 +31,34 @@ jobs:
         run: python -m pip install -r requirements.txt "pytest>=9"
       - name: Run tests
         run: python -m pytest -q
+
+  smoke:
+    name: Smoke render (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: remotion/package-lock.json
+      - name: Install FFmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Install packages
+        run: |
+          python -m pip install -r requirements.txt "pytest>=9"
+          cd remotion
+          npm ci
+      - name: Render a small video end to end, and test branding clips with real FFmpeg
+        env:
+          SMOKE_RENDER: "1"
+        run: python -m pytest -q tests/test_smoke_render.py tests/test_channels.py
 
   typecheck:
     name: Remotion type check

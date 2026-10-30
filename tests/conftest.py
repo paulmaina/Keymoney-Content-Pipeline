@@ -22,3 +22,6 @@ def no_user_defaults(monkeypatch, tmp_path, tmp_path_factory):
     folder = tmp_path_factory.mktemp("channels")
     (folder / f"{channels.DEFAULT}.toml").write_text('name = "Smart Village Boy"\n', encoding="utf-8")
     monkeypatch.setattr(channels, "CHANNELS_DIR", folder)
+    # unit tests never render, so never install Remotion's packages (the smoke test uses the real thing)
+    import remotion_render
+    monkeypatch.setattr(remotion_render, "ensure_installed", lambda: None)

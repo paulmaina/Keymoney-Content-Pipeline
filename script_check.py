@@ -59,7 +59,7 @@ def seconds_label(s):
 
 def analyse(script, args):
     """Everything --check reports, as a dict (printed by report())."""
-    scenes = mv.parse_script(script)
+    scenes = ai_visuals.assign_ids(mv.parse_script(script))  # saved prompts are found by scene id
     flags, notes = [], []
     comments = mv.parse_comments(script)
     for n, text in comments:

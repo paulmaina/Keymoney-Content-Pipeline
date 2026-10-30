@@ -19,10 +19,20 @@ line. The channel is the script's `# channel: <id>` line, else `--channel`, else
 (`smart_village_boy`). Outputs go to `Exports/<id>/<name>/`. Smart Village Boy's voice is Kokoro `am_michael` at `+20%` (the
 user's choice; Kokoro needs `download_models.py` once). `rate` drives every engine (Kokoro speed 1.2 = `+20%`); samples at
 1.0/1.1/1.15/1.2 are in `Exports/voice_samples/kokoro-am_michael-speed*.wav`.
+**Early checks, resuming and Upload:** `preflight` stops a run before any neurons or Kaggle time when a later step can't
+work (FFmpeg, keys for scenes that need pictures, the Kokoro model, Remotion's packages); `--visuals-only` skips the voice and
+video checks. A final render keeps checkpoints in `Working/render/` (`checkpoints.py`: narration, captions, prepared
+pictures and clips, bundle, each video's render) keyed to the script, pictures, settings and code; after a failure, rerun
+the same command to resume (`--fresh` starts over). On success, `Working/manifest.json` lists the Upload files, and
+generated Upload files of the rendered kinds that this run didn't make go to `Working/old_outputs/<time>/` (listed in the
+log). Every video gets its own `.srt` on its own timeline: `<name>.srt`, `<name>_Short.srt`, `<name>_Short_PartN.srt`.
+Saved prompts are keyed by scene id (narration hash + occurrence), so repeated lines keep separate prompts; old files
+migrate on read.
 **Branding clips:** `channels/<id>/branding/intro_horizontal.mp4`, `intro_vertical.mp4`, `outro_horizontal.mp4`,
 `outro_vertical.mp4` and optional `outro_next_part_vertical.mp4` (every Short part but the last) replace the generated intro or
 outro one by one; missing ones stay generated. `remotion_render.prepare_clip` fits each to the frame with padding (never
-stretched), at 30 fps, before the bundle; its own sound is mixed onto the timeline, and music fades in after an own intro.
+stretched), at 30 fps, before the bundle, holding the last picture when its sound is longer, with the frame count
+checked; its own sound is mixed onto the timeline, and music fades in after an own intro.
 `*_TEMPLATE.mp4` files are never used: `channels.py templates <id>` re-exports the generated ones (and README.txt) for the user to
 edit, and `channels.py new "Name"` makes a new channel with all of that. `--check` lists each intro and outro and its length.
 A new channel also needs a style section in SCRIPT_GUIDE.md section 3.

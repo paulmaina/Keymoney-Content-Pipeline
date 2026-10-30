@@ -711,3 +711,26 @@ def test_redo_and_check_options():
     assert mv.parse_args(["s.txt", "--check-images"]).vision_model == av.VISION_MODEL
     with pytest.raises(SystemExit):
         mv.parse_args(["s.txt", "--redo-scenes", "three"])
+
+
+def test_repeated_narration_keeps_a_prompt_and_edit_per_scene(api, tmp_path):
+    prompts = tmp_path / "p.json"
+    # a file from before scene ids: the same line twice, the second with the user's edit
+    prompts.write_text(json.dumps({"scenes": [
+        {"scene": 1, "narration": "Water is life.", "prompt": "a well at dawn"},
+        {"scene": 2, "narration": "Fog over hills.", "prompt": "misty hills"},
+        {"scene": 3, "narration": "Water is life.", "prompt": "MY EDIT: a river at dusk"},
+    ]}), encoding="utf-8")
+    sc = scenes("Water is life.", "Fog over hills.", "Water is life.")
+    run(sc, prompts)
+    assert api.text_calls() == []  # every saved prompt was found, the repeated line's twice
+    assert [c["prompt"].split(",")[0] for c in api.image_calls()] == [
+        "a well at dawn", "misty hills", "MY EDIT: a river at dusk"]
+    saved = json.loads(prompts.read_text(encoding="utf-8"))["scenes"]
+    assert [s["prompt"] for s in saved] == ["a well at dawn", "misty hills", "MY EDIT: a river at dusk"]
+    assert saved[0]["id"] != saved[2]["id"] and all(s["id"] for s in saved)  # migrated: ids written
+    # reordering keeps each scene's own prompt (the repeated line keeps its order among its copies)
+    reordered = scenes("Fog over hills.", "Water is life.", "Water is life.")
+    av.assign_ids(reordered)
+    records = av.load_prompt_records(prompts)
+    assert [av.saved_prompt(records, s) for s in reordered] == ["misty hills", "a well at dawn", "MY EDIT: a river at dusk"]

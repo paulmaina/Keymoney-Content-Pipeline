@@ -102,6 +102,7 @@ def style_test(args, script, scenes, out, providers):
 def run(args, script, scenes, font_path, out):
     """--thumbnail-ideas and/or --style-test, then stop."""
     providers = providers_for(args)
+    ai_visuals.assign_ids(scenes)  # saved prompts are found by scene id
     if args.thumbnail_ideas:
         thumbnail_ideas(args, script, scenes, font_path, out, providers)
     if args.style_test:

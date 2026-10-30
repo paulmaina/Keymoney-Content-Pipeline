@@ -165,6 +165,7 @@ def test_check_says_when_there_is_no_intro_or_outro(tmp_path, capsys):
 def test_clips_are_fitted_with_padding_and_keep_their_sound(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(mv, "run", lambda cmd, cwd=None: calls.append([str(c) for c in cmd]) or "")
+    monkeypatch.setattr(rr, "count_frames", lambda video: 90)
     monkeypatch.setattr(channels, "probe", fake_probe(3.0, audio=True))
     public = tmp_path / "public"
     public.mkdir()
@@ -215,6 +216,7 @@ def test_render_all_uses_each_formats_clips_and_the_next_part_outro(tmp_path, mo
     monkeypatch.setattr(rr, "save_speed", lambda *a: None)
     monkeypatch.setattr(captions, "scene_faces", lambda sc, fmt, **kw: [[] for _ in sc])
     real_prepare = rr.prepare_clip
+    monkeypatch.setattr(rr, "count_frames", lambda video: dict(prepared=prepared)["prepared"][-1][2])
     monkeypatch.setattr(rr, "prepare_clip", lambda src, fmt, n, public, stem: prepared.append((src.name, fmt, n))
                         or real_prepare(src, fmt, n, public, stem))
     bundled = []
@@ -314,3 +316,101 @@ def test_templates_render_each_generated_part_alone(tmp_path, monkeypatch):
     for p in written:
         p.write_bytes(b"x")
     assert all(ch.clip(*key) is None for key in channels.CLIPS)
+
+
+# ---------- captions for every output ----------
+
+def srt_starts(path):
+    """Start seconds of each cue in an .srt."""
+    import re
+    return [int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+            for h, m, s, ms in re.findall(r"^(\d\d):(\d\d):(\d\d),(\d\d\d) -->", path.read_text(encoding="utf-8"), re.M)]
+
+
+def test_every_output_gets_an_srt_on_its_own_timeline(tmp_path, monkeypatch):
+    clip_files("smart_village_boy", "intro_horizontal.mp4", "intro_vertical.mp4")
+    monkeypatch.setattr(channels, "probe", lambda p: fake_probe(2.0 if "horizontal" in p.name else 4.0)(p))
+    args = mv.parse_args(["s.txt"])
+    W = mv.Word
+    chunks = [[W("One", 0.5, 1.0)], [W("Two", 10.2, 10.8)], [W("Three", 21.0, 21.5)]]
+    scenes = [{"dur": 10.0}, {"dur": 11.0}, {"dur": 9.0}]
+    h_lead = (60 - rr.TRANSITION // 2) / mv.FPS  # a 2 s intro, less half the crossfade
+    v_lead = (120 - rr.TRANSITION // 2) / mv.FPS  # a 4 s intro
+    out = outputs.Outputs(tmp_path / "vid").make()
+    # the full video and a single Short
+    full, short = mv.write_output_srts(chunks, scenes, [(0, 3)], ["horizontal", "vertical"], out, args)
+    assert (full.name, short.name) == ("vid.srt", "vid_Short.srt")
+    assert srt_starts(full) == pytest.approx([0.5 + h_lead, 10.2 + h_lead, 21.0 + h_lead], abs=0.002)
+    assert srt_starts(short) == pytest.approx([0.5 + v_lead, 10.2 + v_lead, 21.0 + v_lead], abs=0.002)
+    # a series: each part from 0:00 plus the vertical intro, with only its own words
+    full, one, two = mv.write_output_srts(chunks, scenes, [(0, 1), (1, 3)], ["horizontal", "vertical"], out, args)
+    assert (one.name, two.name) == ("vid_Short_Part1.srt", "vid_Short_Part2.srt")
+    assert srt_starts(one) == pytest.approx([0.5 + v_lead], abs=0.002)
+    assert srt_starts(two) == pytest.approx([0.2 + v_lead, 11.0 + v_lead], abs=0.002)
+    # only the formats rendered; the ffmpeg renderer has no intro
+    (only,) = mv.write_output_srts(chunks, scenes, [(0, 3)], ["vertical"], out, mv.parse_args(["s.txt", "--renderer", "ffmpeg"]))
+    assert only.name == "vid_Short.srt" and srt_starts(only) == pytest.approx([0.5, 10.2, 21.0])
+
+
+# ---------- a clip whose sound outlasts its picture (real FFmpeg) ----------
+
+def ffmpeg_available():
+    import shutil
+    return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs FFmpeg")
+def test_a_clip_with_longer_sound_holds_its_last_frame_for_the_whole_sound(tmp_path):
+    import subprocess
+    src = tmp_path / "outro_vertical.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=2",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=5", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", str(src)], check=True)
+    info = channels.probe(src)
+    assert info["audio"] and info["seconds"] == pytest.approx(5.0, abs=0.1)  # the schedule follows the longest stream
+    frames = round(info["seconds"] * mv.FPS)
+    public = tmp_path / "public"
+    public.mkdir()
+    name, audio = rr.prepare_clip(src, "vertical", frames, public, "branding_outro_vertical")
+    assert rr.count_frames(public / name) == frames == 150  # 2 s of picture held to the full 5 s, trimmed exactly
+    prepared = channels.probe(public / name)
+    assert (prepared["width"], prepared["height"], prepared["fps"], prepared["audio"]) == (1080, 1920, 30.0, False)
+    assert mv.duration(audio) == pytest.approx(5.0, abs=0.02)
+    # the held part shows the clip's last picture, not black
+    from PIL import Image
+    still = tmp_path / "late.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "4.5", "-i", str(public / name), "-frames:v", "1", str(still)],
+                   check=True)
+    with Image.open(still) as img:
+        assert max(img.convert("L").getextrema()) > 40
+
+
+# ---------- early checks ----------
+
+def test_a_missing_voice_model_stops_the_run_before_anything_is_spent(tmp_path, monkeypatch):
+    import ai_visuals
+    import upscale
+    profile("smart_village_boy", 'name = "Smart Village Boy"\nengine = "kokoro"\nvoice = "am_michael"\n')
+    monkeypatch.setattr(mv, "MODELS_DIR", tmp_path / "no_models")
+    monkeypatch.setattr(mv, "check_ffmpeg", lambda: None)
+    monkeypatch.setattr(rr, "available", lambda: (True, ""))
+    monkeypatch.setattr(outputs, "EXPORTS", tmp_path / "Exports")
+    for key in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
+        monkeypatch.setenv(key, "x")
+    spent = []
+    monkeypatch.setattr(ai_visuals, "generate_scene_visuals", lambda *a, **k: spent.append("images") or [])
+    monkeypatch.setattr(ai_visuals, "Providers", lambda *a, **k: spent.append("providers"))
+    monkeypatch.setattr(upscale, "upscale_scenes", lambda *a, **k: spent.append("kaggle"))
+    import stock
+    monkeypatch.setattr(stock, "fill_stock", lambda *a, **k: {})
+    monkeypatch.setattr(stock, "write_media_json", lambda *a, **k: None)
+    p = tmp_path / "s.txt"
+    p.write_text("# A Story About Water\n\nThe river is dry.\n", encoding="utf-8")
+    monkeypatch.setattr(mv.sys, "argv", ["make_video.py", str(p)])
+    with pytest.raises(SystemExit) as e:
+        mv.main()
+    assert "Offline voice model missing" in str(e.value) and spent == []
+    # --visuals-only makes no voice, so it doesn't need the model
+    monkeypatch.setattr(mv.sys, "argv", ["make_video.py", str(p), "--visuals-only"])
+    mv.main()
+    assert spent == ["providers", "images", "kaggle"]

@@ -415,22 +415,40 @@ def lead_seconds(args, fmt):
     return (intro - TRANSITION // 2 if intro else TRANSITION // 2) / mv.FPS
 
 
+def count_frames(video):
+    """The number of video frames FFmpeg actually decodes from a file."""
+    out = mv.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                  "stream=nb_read_frames", "-of", "csv=p=0", str(video)])
+    try:
+        return int(out.strip().split(",")[0])
+    except ValueError:
+        return None
+
+
 def prepare_clip(src, fmt, frames, public, stem):
     """A branding clip fitted inside the format's frame (resized and padded with black, never stretched or cropped),
-    at 30 fps and exactly `frames` long, silent, in the public dir; and its own sound as a wav, or None when it has
-    none. Returns (video file name, audio path or None)."""
+    at 30 fps and exactly `frames` long, silent, in the public dir; and its own sound as a wav of exactly the same
+    length, or None when it has none. `frames` is the clip's scheduled length, from its longest stream: when its sound
+    runs on after its picture, the last frame is held for the whole of it. The prepared clip's frame count is checked
+    before anything is rendered. Returns (video file name, audio path or None)."""
     import channels
     w, h = mv.FORMATS[fmt]["size"]
     video = public / f"{stem}.mp4"
+    hold = frames / mv.FPS + 1  # seconds of held last frame: enough for any picture shorter than the schedule
     mv.run(["ffmpeg", "-y", "-i", src, "-vf",
             f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,"
-            f"setsar=1,fps={mv.FPS},tpad=stop_mode=clone:stop_duration=1",
+            f"setsar=1,fps={mv.FPS},tpad=stop_mode=clone:stop_duration={hold:.3f}",
             "-frames:v", str(frames), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
             video])
+    got = count_frames(video)
+    if got != frames:
+        sys.exit(f"Branding clip {Path(src).name}: the prepared {fmt} clip has {got} frames, not the {frames} the "
+                 "timeline needs. Re-export it as an MP4 (H.264, 30 fps) and try again.")
     audio = None
     if (channels.probe(src) or {}).get("audio"):
         audio = public.parent / f"{stem}.wav"
-        mv.run(["ffmpeg", "-y", "-i", src, "-vn", "-t", f"{frames / mv.FPS:.3f}", "-ar", "48000", "-ac", "2", audio])
+        mv.run(["ffmpeg", "-y", "-i", src, "-vn", "-af", "apad", "-t", f"{frames / mv.FPS:.3f}", "-ar", "48000",
+                "-ac", "2", audio])
     return video.name, audio
 
 
@@ -530,10 +548,20 @@ def plan_cuts(scenes, formats, out, parts):
     return cuts
 
 
-def render_all(scenes, work, narration, chunks, font_path, args, formats, out, script, parts=None):
+class _NoCheckpoints:
+    def get(self, stage):
+        return None
+
+    def save(self, stage, value=True):
+        pass
+
+
+def render_all(scenes, work, narration, chunks, font_path, args, formats, out, script, parts=None, checkpoints=None):
     """Render every format with Remotion: the horizontal video from the whole script, and the vertical one as the
     `parts` [(first, end)] of a Shorts series when there are several. Returns (output paths, seconds before the
-    narration starts, total seconds) for the full-length video."""
+    narration starts, total seconds) for the full-length video. `checkpoints` (checkpoints.Checkpoints): the prepared
+    pictures and clips, the bundle and each video's silent render are kept, and reused when a failed run resumes."""
+    done = checkpoints or _NoCheckpoints()
     ensure_installed()
     fps = mv.FPS
     intro, outro = branding_ends(args, formats[0])[:2]
@@ -548,7 +576,11 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
     state, assets, moves = {}, {}, {}
     camera = getattr(args, "camera", "calm")
     for fmt in formats:
-        assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
+        if (saved := done.get(f"assets_{fmt}")) is not None and len(saved) == len(scenes):
+            assets[fmt] = saved
+        else:
+            assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
+            done.save(f"assets_{fmt}", assets[fmt])
         counts = [len(a.get("shots") or [a]) for a in assets[fmt]]
         masked = {(i, j) for i, a in enumerate(assets[fmt]) for j, sh in enumerate(a.get("shots") or [a]) if sh.get("mask")}
         moves[fmt] = plan_shot_moves(counts, script.stem, masked, camera)
@@ -574,11 +606,22 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
         c_intro, c_outro, intro_src, outro_src = branding_ends(args, fmt, part)
         for src, n in ((intro_src, c_intro), (outro_src, c_outro)):
             if src and (src, fmt) not in clips:
-                clips[(src, fmt)] = prepare_clip(src, fmt, n, public, f"branding_{Path(src).stem}")
+                stage = f"clip_{fmt}_{Path(src).name}"
+                if (saved := done.get(stage)) and (public / saved[0]).exists():
+                    clips[(src, fmt)] = (saved[0], Path(saved[1]) if saved[1] else None)
+                else:
+                    clips[(src, fmt)] = prepare_clip(src, fmt, n, public, f"branding_{Path(src).stem}")
+                    name, audio = clips[(src, fmt)]
+                    done.save(stage, [name, str(audio) if audio else None])
 
-    print("Bundling the Remotion project...")
     bundle = rwork / "bundle"
-    npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={bundle}", "--log=error", capture=True)
+    if done.get("bundle") and (bundle / "index.html").exists():
+        print("Remotion bundle: from the last run")
+    else:
+        print("Bundling the Remotion project...")
+        npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={bundle}", "--log=error",
+            capture=True)
+        done.save("bundle")
 
     starts = [sum(durations[:i]) for i in range(len(scenes) + 1)]  # where each scene starts in the narration
     outs, wrote_sfx = [], False
@@ -618,12 +661,16 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
         silent = rwork / f"{name}_silent.mp4"
         w, h = mv.FORMATS[fmt]["size"]
         label = f"{fmt} part {part[0]} of {part[1]} (scenes {a + 1}-{b})" if part else fmt
-        print(f"Rendering {label} ({w}x{h}) with Remotion...")
         t0 = time.time()
-        npx("remotion", "render", bundle, "Main", silent, f"--props={props}", "--codec=h264", "--crf=18",
-            "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
-        save_speed(fmt, (time.time() - t0) / c_total)
-        print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
+        if done.get(f"render_{name}") and silent.exists():
+            print(f"Rendering {label}: from the last run; mixing the voice{' and music' if args.music else ''}...")
+        else:
+            print(f"Rendering {label} ({w}x{h}) with Remotion...")
+            npx("remotion", "render", bundle, "Main", silent, f"--props={props}", "--codec=h264", "--crf=18",
+                "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
+            save_speed(fmt, (time.time() - t0) / c_total)
+            done.save(f"render_{name}")
+            print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
         # music fades in after the channel's own intro, so it never plays over the intro's sound
         outs.append(mv.mux(silent, audio, args, video, cwd=rwork, video_codec=["-c:v", "copy"], ambience=ambience,
                            music_start=c_intro / fps if intro_src else 0.0))

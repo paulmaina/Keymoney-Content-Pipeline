@@ -67,3 +67,21 @@ def test_a_run_makes_the_upload_and_working_folders_and_logs_there(tmp_path, mon
     assert (folder / "Upload").is_dir() and (folder / "Working").is_dir()
     assert seen == {"prompts": folder / "Working" / "prompts.json", "media": folder / "Working" / "media.json"}
     assert "Visuals only" in (folder / "Working" / "log.txt").read_text(encoding="utf-8")
+
+
+def test_a_final_render_writes_a_manifest_and_moves_stale_uploads(tmp_path):
+    import json
+    out = outputs.Outputs(tmp_path / "Clay").make()
+    for name in ["Clay.mp4", "Clay_Short_Part1.mp4", "Clay_Short_Part2.mp4", "Clay_Short_Part3.mp4", "thumbnail.jpg",
+                 "youtube.md", "my_notes.txt", "Clay_Short.mp4"]:
+        (out.upload / name).write_bytes(b"x")
+    made = [out.upload / "Clay_Short_Part1.mp4", out.upload / "Clay_Short_Part2.mp4"]
+    moved = out.finish(made, {"vertical"})  # a vertical-only render with --no-metadata
+    assert sorted(p.name for p in moved) == ["Clay_Short.mp4", "Clay_Short_Part3.mp4"]
+    assert all(p.parent.parent == out.working / "old_outputs" and p.exists() for p in moved)
+    left = sorted(p.name for p in out.upload.iterdir())
+    assert left == ["Clay.mp4", "Clay_Short_Part1.mp4", "Clay_Short_Part2.mp4", "my_notes.txt", "thumbnail.jpg",
+                    "youtube.md"]  # other kinds and the user's own file stay
+    assert json.loads(out.manifest.read_text(encoding="utf-8"))["files"] == ["Clay_Short_Part1.mp4", "Clay_Short_Part2.mp4"]
+    assert out.finish(made, {"vertical"}) == []  # nothing stale the second time
+    assert out.kind("Clay_Short_Part12.mp4") == "vertical" and out.kind("Clay_v2.mp4") is None

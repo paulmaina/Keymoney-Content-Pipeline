@@ -25,6 +25,9 @@ def story(tmp_path, monkeypatch):
     monkeypatch.setattr(outputs, "EXPORTS", tmp_path / "Exports")
     monkeypatch.setattr(mv, "check_ffmpeg", lambda: None)
     monkeypatch.setattr(rr, "available", lambda: (True, ""))
+    for key, value in (("CLOUDFLARE_ACCOUNT_ID", CREDS[0]), ("CLOUDFLARE_API_TOKEN", CREDS[1]),
+                       ("POLLINATIONS_API_KEY", "sk_test")):  # the keys the early checks look for
+        monkeypatch.setenv(key, value)
     monkeypatch.setattr(mv, "narrate", lambda sc, work, args: work / "voice.wav")
     monkeypatch.setattr(mv, "make_captions", lambda *a, **k: (None, None))
     monkeypatch.setattr(mv, "duration", lambda path: 12.0)
@@ -42,7 +45,7 @@ def story(tmp_path, monkeypatch):
             providers.backup[2] = "Pollinations backup image"
         return []
 
-    def render_all(sc, work, narration, chunks, font, args, formats, out, script, parts):
+    def render_all(sc, work, narration, chunks, font, args, formats, out, script, parts, checkpoints=None):
         seen.update(formats=formats, video=out.video(formats[0]), parts=parts)
         return [out.video(f) for f in formats], 0.0, 12.0
     monkeypatch.setattr(av, "Providers", Providers)

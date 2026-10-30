@@ -12,12 +12,21 @@ its own look, voice and intro and outro. Each video gets its own folder, `Export
 | `youtube.md` | | Titles, descriptions, chapters and tags, with a section per Short ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
 
 `Exports/<channel>/<name>/Working/` holds everything else: `prompts.json` (image prompts and the character sheet), `media.json` (stock
-picks and credits), `image_checks.json` (`--check-images` verdicts), the captions (`<name>.srt` and one per Short), `log.txt`
-(everything the run printed), `kaggle/` (job files of the Kaggle runs) and `render/` (temporary files, removed after the run
-unless `--keep-work`), plus `<name>_DRAFT.mp4` ([drafts](#drafts-and-brainstorming)), `preview.mp4`, `thumbnail_ideas/` and
+picks and credits), `image_checks.json` (`--check-images` verdicts), an `.srt` for every video (`<name>.srt`, `<name>_Short.srt`
+or `<name>_Short_PartN.srt`, each timed after that video's own intro), `log.txt` (everything the run printed), `manifest.json`
+(the files the last final render put in `Upload/`), `old_outputs/` (generated files an earlier render left in `Upload/` that
+the latest one didn't make, such as old Short parts; the run lists them), `kaggle/` (job files of the Kaggle runs) and
+`render/` (temporary files and the render's checkpoints, removed after a successful render unless `--keep-work`), plus `<name>_DRAFT.mp4` ([drafts](#drafts-and-brainstorming)), `preview.mp4`, `thumbnail_ideas/` and
 `style_tests/` when you make them. The images, upscaled images, stock media and voice lines stay in the shared caches in
 `generated/`, so a new folder never regenerates anything. A run ends with `FINAL render: ready to upload from <Upload folder>`,
 or `DRAFT render: <Working folder>`.
+
+**Early checks and resuming.** Before a run spends any neurons or Kaggle time, it checks what later steps need (FFmpeg, the
+image services' keys when a scene needs a picture made, the voice engine and the Kokoro model, Remotion's packages) and stops
+with a clear message if something is missing; `--visuals-only` skips the voice and video checks. A final render keeps
+checkpoints in `Working/render/` (the narration, captions, Remotion's prepared pictures and bundle, each video's render),
+keyed to the script, the pictures, the settings and the code, so a run that fails part-way resumes from its last finished
+stage. `--fresh` starts over.
 
 The plain command is a full **final render**: Cloudflare writes every image prompt and draws every image (stock footage where it
 fits better), a vision model checks each image, Kaggle sharpens them, and the voice, captions, both videos and the YouTube notes
@@ -174,7 +183,9 @@ missing stays generated (the folder's `README.txt` has the details):
 | `outro_next_part_vertical.mp4` | 1080x1920 | 3–5 s | optional: every other part's end, instead of "Watch Part N" |
 
 MP4 at 30 fps is best; other sizes and frame rates are resized and padded with black bars (never stretched or cropped) and
-converted to 30 fps by FFmpeg before Remotion plays them, and clips under 1 s are ignored. The intro and outro crossfade with the
+converted to 30 fps by FFmpeg before Remotion plays them, and clips under 1 s are ignored. A clip lasts as long as its longer
+part: when its sound runs on after its picture, the last picture is held, and the prepared clip's frame count is checked
+before anything renders. The intro and outro crossfade with the
 first and last scene as the generated ones do. Each clip keeps its own sound; music fades in after your intro and ducks under
 the voice and your outro's sound. The clips' real lengths drive the timeline, the YouTube chapters, the Shorts captions and the
 Shorts split (each part still stays under 2:50), and `--check` lists every intro and outro with its length. Files ending in
@@ -681,8 +692,11 @@ maths, camera moves that never show an edge, per-format images, caption timing, 
 All Cloudflare, Pollinations, Pexels, Pixabay, Kaggle, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that
 `kaggle/upscale.ipynb` and `kaggle/chatterbox.ipynb` match their `.py` sources. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
 
-**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the tests on Windows and the Remotion type check on every pull request and
-on `main`, with no secrets. Changes reach `main` through a pull request whose checks pass.
+**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the tests on Windows, a smoke render and the Remotion type check on every pull
+request and on `main`, with no secrets. The smoke render (`tests/test_smoke_render.py`, about a minute; locally with
+`SMOKE_RENDER=1`) makes a tiny final render with the real FFmpeg and Remotion, fully offline (synthetic narration, local
+pictures, branding clips with their own sound, music) and checks both orientations, their lengths, each video's captions, the
+intro's sound and the Upload manifest. Changes reach `main` through a pull request whose checks pass.
 
 ## Credits
 The bundled font, `assets/fonts/NotoSans-Bold.ttf`, is licensed under the SIL Open Font License (`assets/fonts/OFL.txt`).
