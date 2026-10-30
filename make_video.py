@@ -29,7 +29,6 @@ Usage:
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --format vertical --music "Raw Footage\\song.mp3"
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --engine kokoro --voice am_michael
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --generate-visuals --style "cinematic, warm tones"
-  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --generate-visuals --upscale   (sharper images via Kaggle)
 """
 import argparse
 import asyncio
@@ -673,7 +672,7 @@ def parse_args(argv=None):
                          "horizontal one unless --format vertical, to Exports/<name>/Working/preview.mp4, to compare "
                          "quickly; makes any missing images for those scenes only")
     ap.add_argument("--visuals-only", action="store_true",
-                    help="make and cache the prompts and images (with their checks, stock and --upscale), then stop "
+                    help="make and cache the prompts and images (with their checks, stock and upscaling), then stop "
                          "before the voice and video: for scripts that need several days of Cloudflare allowance")
     ap.add_argument("--prompts-only", action="store_true",
                     help="write Exports/<name>/Working/prompts.json for review, then stop (no images, audio or video)")
@@ -693,9 +692,6 @@ def parse_args(argv=None):
     ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL,
                     help="Workers AI image model: a short name (" + ", ".join(ai_visuals.IMAGE_MODELS) +
                          ") or a full @cf/... ID (default flux-2-klein-4b, ~132 neurons an image, one per format)")
-    ap.add_argument("--upscale", action=on_off, default=False,
-                    help="sharpen scene images under 2048 px with Real-ESRGAN on a free Kaggle GPU, in one batch "
-                         "(results are cached; needs KAGGLE_API_TOKEN in .env)")
     ap.add_argument("--renderer", choices=["remotion", "ffmpeg"], default="remotion",
                     help="remotion = eased pans and zooms, 2.5D parallax, crossfades, animated captions, place labels, "
                          "a world map and a branded intro/outro (needs Node.js; slower); ffmpeg = simple zooms, fast. "
@@ -855,9 +851,9 @@ def produce(args, script, scenes, font_path, out):
                 ai_visuals.write_check_report(scenes, out.checks)
     elif args.regenerate:
         print("Note: --regenerate only applies with --generate-visuals.")
-    if args.upscale:
-        import upscale
-        upscale.upscale_scenes(picked, formats, work=out.kaggle("upscale"))
+    notes = []  # warnings repeated at the end of the run
+    import upscale  # every render: sharper images from Kaggle, or the originals with a warning
+    upscale.upscale_scenes(picked, formats, work=out.kaggle("upscale"), notes=notes)
     if args.visuals_only:
         missing = f" Still missing: scene(s) {', '.join(map(str, failed_visuals))}." if failed_visuals else ""
         print(f"Visuals only: prompts and images are saved and cached; no voice or video was made.{missing} "
@@ -925,6 +921,8 @@ def produce(args, script, scenes, font_path, out):
     if failed_visuals:
         print(f"Image generation failed for scene(s) {', '.join(map(str, failed_visuals))}; "
               "they use title cards. Rerun later to retry (successful images are cached).")
+    for note in notes:
+        print(f"WARNING: {note}")
 
 
 def render_preview(args, script, scenes, font_path, out, fmt):

@@ -3,7 +3,7 @@
 Reports scene count, words and estimated seconds per scene, [video] (stronger move) and [visual:] scenes,
 the '#' comment lines it skipped, and flags overlong paragraphs, missing [visual:] files and leftover [tags] that
 would be spoken. Estimates Cloudflare neurons (counting cached prompts and images as free), Kaggle GPU time for
---upscale and the render time. No network, audio or ffmpeg is used.
+upscaling and the render time. No network, audio or ffmpeg is used.
 """
 import re
 
@@ -18,7 +18,7 @@ MAX_SENTENCES, MAX_WORDS, SENTENCE_WORDS = 3, 60, 40
 VIDEO_SHARE = (12, 6)  # [video] on about one scene in 12 to one in 6 (at least 1, and up to 5 in a short script)
 PREVIOUS_PROMPT_CHARS = 350  # a typical image prompt, passed as context to the next one
 PROMPT_OUT_TOKENS, CHECK_OUT_TOKENS = 90, 60
-# --upscale on Kaggle T4, measured on Script2 (Oct 2026): a 1.9 min session for 38 images at 1536x864 (2x),
+# upscaling on Kaggle T4, measured on Script2 (Oct 2026): a 1.9 min session for 38 images at 1536x864 (2x),
 # ~0.6 min of install and weights plus 2.0 s per image; rounded up a little
 UPSCALE_SETUP_MIN, UPSCALE_SEC_PER_IMAGE = 1.0, 2.0
 KAGGLE_WEEKLY_HOURS = 30
@@ -131,7 +131,7 @@ def analyse(script, args):
                     est["images_cached"] += 1
                     if args.check_images and not ai_visuals.load_verdict(hit):
                         est["checks"] += 1  # cached, but never checked
-                    if args.upscale and not upscale_cached(hit):
+                    if not upscale_cached(hit):
                         est["upscale_todo"] += 1
                 else:
                     est["images_new"] += 1
@@ -160,8 +160,7 @@ def analyse(script, args):
         est["neurons_checks"] += est["second_images_new"] * check_neurons(args.vision_model)
     est["neurons_total"] = (est["neurons_prompts"] + est["neurons_images"] + est["neurons_checks"]
                             + est["neurons_second"])
-    if args.upscale:  # new images are always under 2048 px, so each one goes to Kaggle once
-        est["upscale_todo"] += est["images_new"]
+    est["upscale_todo"] += est["images_new"]  # new images are always under 2048 px, so each one goes to Kaggle once
     import shorts
     seconds = [r["seconds"] for r in rows]
     sections = mv.parse_sections(script)
@@ -276,7 +275,12 @@ def stock_plan(scenes, args, out):
 
 def upscale_cached(image):
     import upscale
-    return upscale.long_side(image) >= upscale.MIN_SIDE or upscale.cached_path(image).exists()
+    try:
+        if upscale.long_side(image) >= upscale.MIN_SIDE:
+            return True
+    except OSError:  # unreadable: the render finds out; here it just counts as to do
+        pass
+    return upscale.cached_path(image).exists()
 
 
 def report(script, args):
@@ -384,12 +388,11 @@ def report(script, args):
         print(f"  ! this needs about {est['days']} days of Cloudflare's free allowance. Run the same command with "
               "--visuals-only once a day (each day's images are cached) until --check shows 0 new images, then render.")
     print()
-    if args.upscale:
-        if est["upscale_todo"]:
-            print(f"Kaggle (--upscale): {est['upscale_todo']} image(s) to upscale, about {a['upscale_minutes']:.0f} min "
-                  f"of the ~{KAGGLE_WEEKLY_HOURS} free GPU hours a week")
-        else:
-            print("Kaggle (--upscale): every image is already upscaled (cached), so no GPU time needed")
+    if est["upscale_todo"]:
+        print(f"Kaggle upscaling: {est['upscale_todo']} image(s) to upscale, about {a['upscale_minutes']:.0f} min "
+              f"of the ~{KAGGLE_WEEKLY_HOURS} free GPU hours a week (if Kaggle fails, the originals are used)")
+    else:
+        print("Kaggle upscaling: every image is already upscaled (cached), so no GPU time needed")
     render_estimate(a["total_seconds"], args, [r["seconds"] for r in rows], a["parts"])
     return a
 

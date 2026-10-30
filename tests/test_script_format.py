@@ -216,10 +216,11 @@ def test_check_counts_cached_prompts_and_images_as_free(tmp_path, monkeypatch):
 
 def test_check_estimates_upscaling_on_kaggle(tmp_path, monkeypatch):
     monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
-    a = check(tmp_path, "One scene.\n\nTwo scene.\n", "--upscale")
+    a = check(tmp_path, "One scene.\n\nTwo scene.\n")  # always on: no flag needed
     assert a["estimates"]["upscale_todo"] == 4  # 2 scenes x 2 shapes, all new
     assert a["upscale_minutes"] == pytest.approx(sc.UPSCALE_SETUP_MIN + 4 * sc.UPSCALE_SEC_PER_IMAGE / 60)
-    assert check(tmp_path, "One scene.\n")["upscale_minutes"] == 0  # not asked for
+    with pytest.raises(SystemExit):
+        check(tmp_path, "One scene.\n", "--upscale")  # the flag is gone
 
 
 def test_pollinations_images_cost_no_cloudflare_neurons(tmp_path):
@@ -234,18 +235,17 @@ def test_check_needs_no_ffmpeg_or_network(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["make_video.py", str(p), "--check"])
     mv.main()
     out = capsys.readouterr().out
-    assert "4 scenes" in out and "Strong move ([video]): 1, 4" in out and "Kaggle" not in out
+    assert "4 scenes" in out and "Strong move ([video]): 1, 4" in out and "Kaggle upscaling: " in out
 
 
 # ---------- 5. config defaults ----------
 
 def test_style_from_config_file(tmp_path, monkeypatch):
     cfg = tmp_path / "make_video.toml"
-    cfg.write_text('[defaults]\nstyle = "3D animated film style"\nrate = "+20%"\nimage-model = "flux-1-schnell"\n'
-                   'upscale = true\n')
+    cfg.write_text('[defaults]\nstyle = "3D animated film style"\nrate = "+20%"\nimage-model = "flux-1-schnell"\n')
     monkeypatch.setattr(mv, "CONFIG_FILE", cfg)
     a = mv.parse_args(["s.txt"])
-    assert (a.style, a.rate, a.image_model, a.upscale) == ("3D animated film style", "+20%", "flux-1-schnell", True)
+    assert (a.style, a.rate, a.image_model) == ("3D animated film style", "+20%", "flux-1-schnell")
 
 
 def test_env_style_beats_config_and_cli_beats_both(tmp_path, monkeypatch):
@@ -373,7 +373,7 @@ def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, 
 def test_project_defaults_make_the_script_name_the_whole_command(monkeypatch):
     monkeypatch.setattr(mv, "CONFIG_FILE", mv.ROOT / "make_video.toml")
     a = mv.parse_args(["s.txt"])
-    assert (a.generate_visuals, a.check_images, a.upscale) == (True, True, True)
-    a = mv.parse_args(["s.txt", "--no-upscale", "--no-check-images", "--no-generate-visuals"])
-    assert (a.generate_visuals, a.check_images, a.upscale) == (False, False, False)
+    assert (a.generate_visuals, a.check_images) == (True, True)
+    a = mv.parse_args(["s.txt", "--no-check-images", "--no-generate-visuals"])
+    assert (a.generate_visuals, a.check_images) == (False, False)
     assert mv.parse_args(["s.txt", "--no-generate-visuals", "--redo-scenes", "3"]).generate_visuals  # redo still draws

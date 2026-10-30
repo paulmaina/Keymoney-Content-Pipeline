@@ -1,14 +1,16 @@
-"""--upscale: sharper scene images from Real-ESRGAN on a free Kaggle GPU (kaggle/upscale.ipynb).
+"""Sharper scene images from Real-ESRGAN on a free Kaggle GPU (kaggle/upscale.ipynb), on every final render.
 
-Every scene image under MIN_SIDE px on its long side that isn't upscaled yet goes to Kaggle in one batch
+Every scene image (Cloudflare, the Pollinations backup or a stock photo) under MIN_SIDE px on its long side that isn't upscaled yet goes to Kaggle in one batch
 (one private dataset, one kernel run). The notebook enlarges each 2x (4x for images under 1024 px) and the
 results are cached in generated/upscaled/<hash of the source image>.jpg, so each image is upscaled only once:
 a rerun with the same images doesn't touch Kaggle at all.
 
-If the run fails or Kaggle can't be reached, the video is rendered with the original images.
+If the run fails, Kaggle can't be reached, KAGGLE_API_TOKEN is missing or the weekly GPU hours are used up, the video
+is rendered with the original images and a warning says so (also repeated at the end of the run).
 """
 import hashlib
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -117,11 +119,27 @@ def hours_cap(n):
     return min(MAX_HOURS, SETUP_HOURS + n * HOURS_PER_IMAGE)
 
 
+def warn(text, notes=None):
+    """A warning that stands out in the log; `notes` collects it for the end-of-run summary."""
+    print(f"  WARNING: {text}")
+    if notes is not None:
+        notes.append(text)
+
+
+def failure(e):
+    """Why Kaggle didn't upscale, in a line."""
+    text = str(e).strip()
+    if re.search(r"quota|exceed|weekly|no (more )?gpu|limit reached", text, re.I):
+        return "Kaggle's weekly GPU hours look used up (they reset each week)"
+    return text.splitlines()[0][:300] if text else e.__class__.__name__
+
+
 def upscale_scenes(scenes, formats, cli=None, sleep=time.sleep, clock=time.monotonic,
-                   interval=kaggle_runner.POLL_SECONDS, work=None):
+                   interval=kaggle_runner.POLL_SECONDS, work=None, notes=None):
     """Upscale every small scene image not in the cache in one Kaggle run, then use the upscaled images.
     `work` holds the Kaggle job files (the video's Working/kaggle/upscale); the upscaled images always go to the shared
-    cache. Returns the GPU minutes used (None if Kaggle wasn't needed or didn't report it)."""
+    cache. Never stops the render: when Kaggle can't help, the originals are used and a warning is printed (and added to
+    `notes`). Returns the GPU minutes used (None if Kaggle wasn't needed or didn't report it)."""
     work = Path(work) if work else WORK
     images = scene_images(scenes, formats)
     small = [p for p in images if long_side(p) < MIN_SIDE]
@@ -131,7 +149,7 @@ def upscale_scenes(scenes, formats, cli=None, sleep=time.sleep, clock=time.monot
     used = None
     if todo:
         try:
-            cli = cli or kaggle_runner.KaggleCLI(kaggle_runner.api_token())
+            cli = cli or kaggle_runner.KaggleCLI(kaggle_runner.api_token("Upscaling"))
             job_dir = work / "job"
             items = export_job(todo, job_dir)
             print(f"Sending {len(todo)} image(s) to Kaggle for Real-ESRGAN in one batch...")
@@ -145,10 +163,11 @@ def upscale_scenes(scenes, formats, cli=None, sleep=time.sleep, clock=time.monot
             if (secs := [e["seconds"] for e in entries if isinstance(e.get("seconds"), (int, float))]):
                 print(f"  {sum(secs) / len(secs):.1f} s per image on the GPU, {sum(secs) / 60:.1f} min in total")
             if got < len(todo):
-                print(f"  {len(todo) - got} image(s) weren't upscaled (Kaggle status {status.lower()}); "
-                      "they're rendered from the originals. Rerun with --upscale to retry only those.")
-        except (kaggle_runner.KaggleError, OSError) as e:
-            print(f"  Kaggle upscaling failed ({e}); rendering with the original images.")
+                warn(f"{len(todo) - got} of {len(todo)} image(s) weren't upscaled (Kaggle status {status.lower()}); "
+                     "they're rendered from the originals. The next render retries only those.", notes)
+        except (kaggle_runner.KaggleError, OSError, SystemExit) as e:  # SystemExit: no or a rejected KAGGLE_API_TOKEN
+            warn(f"upscaling skipped: {failure(e)}. Rendering with the original images; the next render tries "
+                 "again.", notes)
     n = apply(scenes)
     if n:
         print(f"  rendering with {n} upscaled image(s) from {UPSCALED_DIR}")
