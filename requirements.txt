@@ -8,3 +8,4 @@ Pillow>=11.0
 python-dotenv>=1.0
 kaggle>=2.2.5
 youtube-transcript-api>=1.2
+opencv-python-headless>=4.10,<5  # face detection, so captions never cover a face (5.x dropped the Haar detectors)

@@ -1,11 +1,15 @@
 ---
 name: produce-video
-description: Turn a script in Scripts/ into finished narrated, captioned horizontal and vertical videos with make_video.py. Use when the user asks to make, render, produce or re-render a video from a script, convert a production document into a voiceover script, pick a voice or speed, prepare visuals for scenes (own footage, AI images, choosing the image model, sharpening images with --upscale on Kaggle), or get YouTube titles, description, chapters, tags and a thumbnail for a render.
+description: Turn a script in Scripts/ into finished narrated, captioned horizontal and vertical videos with make_video.py. Use when the user asks to make, render, produce or re-render a video from a script, convert a production document into a voiceover script, pick a voice or speed (including the Chatterbox voice on Kaggle), choose stock footage or caption styles, prepare visuals for scenes (own footage, AI images, choosing the image model, sharpening images with --upscale on Kaggle), or get YouTube titles, description, chapters, tags and a thumbnail for a render.
 ---
 
 # Produce a video from a script
 
-The pipeline is `make_video.py` in the project root (see README.md for every option).
+The pipeline is `make_video.py` in the project root (see README.md for every option). `Commands.txt` is the user's plain-text
+runbook (setup, script format, workflow, every command, limits, troubleshooting).
+
+**Keep Commands.txt in step:** whenever you add, remove or rename an option, change a default in `make_video.toml`, or change the
+workflow, setup, limits or a common error's fix, update `Commands.txt` in the same change (as well as README.md and this skill).
 It makes the voice over, captions and both video formats, animated by Remotion by default (section 3). Each scene's picture comes from:
 1. its `[visual: file]` line (always wins), else
 2. with `--generate-visuals`: AI images, a real 16:9 one for the horizontal video and a 9:16 one for the vertical
@@ -14,13 +18,17 @@ It makes the voice over, captions and both video formats, animated by Remotion b
 `--upscale` then sharpens any of those images under 2048 px on a free Kaggle GPU (section 2).
 
 ## 1. Get a script in the user's format
+`SCRIPT_GUIDE.md` is the user's script standard (also used in their separate scripting project) and `Scripts/TEMPLATE.txt` its
+example; `tests/test_script_guide.py` keeps the example passing `--check`. Follow it when writing or converting scripts, and when
+the parser or `--check` changes, update the guide and the template so that test still passes.
 The user's format is one paragraph per scene, separated by blank lines, with 2-3 spoken sentences each and 15-20 paragraphs:
 - `[video]` at the start of 4-5 action paragraphs: those scenes get a stronger camera move. It can be on the narration's line
   (`[video] Ama runs...`) or on its own line. (AI video clips were removed; `[video]` never means a clip now.)
 - Optional `[visual: filename]` at the start of a paragraph, for the user's own media.
 - `# character: Name = description` lines declare recurring characters (age, origin, build, hair, clothing, colours), kept identical
-  in every scene that names them. Declare real people the script names too (Script2 declares Sonam Wangchuk), so they're drawn
-  as described instead of guessed or swapped for another character.
+  in every scene that names them. **Invented characters only:** a real person is named in the narration and described by role,
+  age and clothing in the `Visuals:` lines, the same words each time (SCRIPT_GUIDE.md 2.4). Script2 still declares Sonam
+  Wangchuk from before this rule; ask before changing it.
 - `#` lines labelled `Visuals:` / `Visual:` / `Shot:` / `Description:` inside a paragraph are that scene's visual
   description. They're never spoken, but they decide the scene's image prompt, and characters they name are drawn in it.
   Editing one makes that scene's prompt be written again.
@@ -40,7 +48,7 @@ don't run it directly. Write `Scripts/<name>_voiceover.txt` in that format and l
 - Write numbers the way they should be spoken where TTS may stumble (e.g. "40 to 60 watt").
 
 Then **always run `--check` first** and show the user its report, with the options you'll render with:
-`.venv\Scripts\python make_video.py Scripts\<file>.txt --check --generate-visuals [--new-images] [--check-images] [--upscale]`
+`.venv\Scripts\python make_video.py Scripts\<file>.txt --check [--new-images] [--redo-scenes "3,7"]`
 It lists scenes with words and estimated seconds, which get an AI image, a strong move or an own file, the skipped `#` comments,
 and the Cloudflare neuron, Kaggle GPU-time and render-time estimates. It flags paragraphs that are too long, missing `[visual:]`
 files and stray `[tags]`, and warns when the neurons exceed the free 10,000 a day. It needs no network or FFmpeg. Fix the flags first.
@@ -48,10 +56,13 @@ files and stray `[tags]`, and warns when the neurons exceed the free 10,000 a da
 **Before a full render of a new or changed script, suggest running the fact-check skill** (it writes
 `Research/<script>_factcheck.md` and never edits the script without asking). If the user declines, go ahead.
 
-The normal command is `make_video.py Scripts\<file>.txt --generate-visuals`: FLUX.2 [klein] 4B images for every scene,
-animated locally by the Remotion renderer (section 3). Add `--upscale` when the user wants sharper images.
-Defaults live in `make_video.toml` ([defaults] table, option names without dashes), currently the photorealistic documentary
-style, the Emma Multilingual voice and +5%. `VIDEO_STYLE` in `.env` overrides style (it's present but empty, so the toml
+The normal command is just `make_video.py Scripts\<file>.txt`: `make_video.toml` turns on `generate-visuals` (stock or
+FLUX.2 [klein] 4B images for every scene), `check-images` (~40 neurons an image) and `upscale` (Kaggle), animated locally by the
+Remotion renderer (section 3). `--no-generate-visuals`, `--no-check-images` and `--no-upscale` turn one off for a run (e.g.
+`--no-check-images` when the day's neurons are short, `--no-upscale` for a quick draft).
+Defaults live in `make_video.toml` ([defaults] table, option names without dashes), currently those three, the photorealistic
+documentary style, the Chatterbox "natural" voice on Kaggle (emotion 0.5, cfg 0.5; Emma Multilingual as the fallback and for
+`--engine edge`) and +5%. `VIDEO_STYLE` in `.env` overrides style (it's present but empty, so the toml
 style applies); command-line options override both. So don't repeat those options unless changing them.
 
 ## 2. Visuals
@@ -132,6 +143,18 @@ Always review prompts before spending image quota:
 - ~40 neurons a check (~1,500 for 38 images), plus ~132 + 40 per redraw. The run prints the real total; `--check` estimates it.
 - Always look at the FLAGGED scenes yourself and tell the user about them; the checker can miss or invent problems.
 
+### Stock footage and photos (`--media`, Pexels and Pixabay)
+- Keys: `PEXELS_API_KEY` / `PIXABAY_API_KEY` in `.env` (check by length only). Whichever exist are used (`--stock` picks one);
+  with neither, scenes go straight to AI images. Pexels keys were paused in Oct 2026, so Pixabay is the one set up.
+- `--media mixed` (default, in `make_video.toml`): stock where the best result scores 7+/10, AI elsewhere; scenes naming a
+  `# character:` stay AI. `stock`: stock wherever 4+. `ai`: never. `# media: stock` / `# media: ai` force one scene.
+- Videos first, then photos; real footage and photos only. One pool scored by `@cf/meta/llama-3.1-8b-instruct-fp8-fast`
+  (keyword overlap without Cloudflare, which picks badly in `stock` mode, so tell the user), plus bonuses for video,
+  1080p sharpness, orientation and length; chosen per format, Pexels on a tie. ~10 neurons a scene.
+- `Exports/<name>_media.json` records each scene's choice, provider, creator and link; the YouTube description credits them.
+  Check the stock picks in frames: tags can match a clip that shows the wrong country or a staged scene.
+- Searches are cached 24 h and downloads for good in `generated/stock/`; Pixabay is 100 requests/min, Pexels 200/hour.
+
 ### Sharper images (`--upscale`, Real-ESRGAN on a free Kaggle T4)
 - Sends every scene image under 2048 px that isn't upscaled yet to Kaggle **in one batch**: one private dataset version and one
   private kernel run (`kaggle/upscale.ipynb`), polled every minute. 2x with RealESRGAN_x2plus (1536x864 -> 3072x1728), 4x if 2x
@@ -145,11 +168,20 @@ Always review prompts before spending image quota:
 ## 3. Render
 Run from the project root (not from Scripts/), in the background, since 20 scenes take several minutes:
 ```
-.venv\Scripts\python make_video.py Scripts\<file>.txt --generate-visuals
+.venv\Scripts\python make_video.py Scripts\<file>.txt
 ```
+(`generate-visuals`, `check-images` and `upscale` are on in `make_video.toml`; ask before adding Kaggle or Cloudflare work
+beyond them.)
 - The user's preferences (voice, speed, the photorealistic style) come from `make_video.toml`, so they don't need to be typed.
+  The user chose the Chatterbox "natural" voice as the default, so a normal render uses a short Kaggle GPU session; add
+  `--engine edge` only when they want Emma or a render without Kaggle.
   Other natural Multilingual edge voices: Andrew, Brian, Ava, Emma, en-AU-William.
   They need internet; `--engine kokoro --voice am_michael` works offline.
+- `--engine chatterbox`: Chatterbox on a free Kaggle T4, all lines in one batch, cached per line in `generated/voice/`
+  (a stopped run resumes with only the missing lines), whole-video fallback to Edge Emma if Kaggle fails; report the GPU
+  time it prints. Settings `chatterbox-voice` (reference clip: **only a voice the user has the right to use** — never clone
+  someone else's voice from a video or another TTS), `chatterbox-emotion` (0.25-2, default 0.5) and `chatterbox-cfg` (0.5;
+  ~0.3 at high emotion). `.venv\Scripts\python chatterbox_tts.py` makes comparison samples in `Exports/voice_samples/`.
 - `--format vertical` or `horizontal` renders only one (and draws only that image shape); `--music <file>` adds ducked background music.
 
 ### Renderer (`--renderer remotion`, the default)
@@ -159,7 +191,11 @@ Run from the project root (not from Scripts/), in the background, since 20 scene
 - Image scenes: eased pans, tilts, zooms and pushes, never the same move twice in a row, clamped so edges never show; `[video]`
   scenes move more. Each format uses its own 16:9 or 9:16 image. Subtle 2.5D parallax only where the depth model finds a clear
   subject in front of a backdrop (`--no-parallax` turns it off). Crossfades are centred on narration boundaries.
-- Animated captions (spoken word in yellow), a place label when the narration reaches a new place, a world-map card with a pin the
+- Captions by `--caption-style` (toml `caption-style`): `auto` = `bold` vertical (2-4 big words a line, popping in as spoken)
+  and `clean` horizontal (calm lines, spoken word yellow); `minimal` is a small plain line. Key words (numbers, places, names,
+  "called X" hack names) are coloured and slightly bigger. Lines move off faces found by YuNet (`models/`, cached per image);
+  check a few vertical frames for captions on faces, under Shorts' buttons (right side) or on the map/label.
+- A place label when the narration reaches a new place, a world-map card with a pin the
   first time each country comes up, and a 2 s intro plus 3.5 s outro (`--no-branding` drops them). The `.srt` and YouTube
   chapters are shifted to match the intro.
 - It prints a render-time estimate from the last measured speed. On this PC (i7-1355U, integrated graphics, 16 GB) Script2 (2:37)

@@ -17,6 +17,7 @@ Script format (plain .txt):
   - [visual: myclip.mp4] at the start of a line sets that scene's footage or image
     (looked up in the "Raw Footage" folder, then next to the script).
   - "# character: Name = description" declares a character for consistent AI images.
+  - "# media: ai" or "# media: stock" in a paragraph forces that scene's picture source (see --media).
   - Any other line starting with # is a comment: never spoken, captioned or used in prompts.
   Scenes without a visual reuse files from the footage folder in order,
   or fall back to a generated title card showing the scene text.
@@ -106,16 +107,19 @@ CHARACTER_LINE = re.compile(r"^#\s*character\s*:\s*(.+?)\s*(?:=|:| - | – | —
 # "# HACK 1 NIGERIA - Visuals: market in harsh sun", "# Shot: ...": what the scene should show. Used in that scene's image
 # and motion prompts (never spoken or captioned). Any other '#' line is a plain comment.
 DESCRIPTION_LINE = re.compile(r"^#.*?\b(?:visuals?|shot|description)\s*:\s*\S", re.I)
+MEDIA_LINE = re.compile(r"^#\s*media\s*:\s*(ai|stock)\s*$", re.I)
 
 
 def parse_script(path):
     scenes = []
     for block in re.split(r"\n\s*\n", path.read_text(encoding="utf-8-sig")):
-        visual, lines, video, described = None, [], False, []
+        visual, lines, video, described, media = None, [], False, [], None
         for line in block.strip().splitlines():
             line = line.strip()
             if line.startswith("#"):
-                if DESCRIPTION_LINE.match(line) and not CHARACTER_LINE.match(line):
+                if (m := MEDIA_LINE.match(line)):
+                    media = m.group(1).lower()
+                elif DESCRIPTION_LINE.match(line) and not CHARACTER_LINE.match(line):
                     described.append(line.lstrip("#").strip())
                 continue  # never spoken or captioned; plain comments aren't used anywhere
             while (m := LEADING_TAG.match(line)):
@@ -128,7 +132,7 @@ def parse_script(path):
                 lines.append(line)
         if lines:
             scenes.append({"text": " ".join(lines), "visual": visual, "video": video,
-                           "description": "; ".join(described)})
+                           "description": "; ".join(described), **({"media": media} if media else {})})
     return scenes
 
 
@@ -159,10 +163,12 @@ def parse_sections(path):
 
 
 def parse_comments(path):
-    """(line number, text) of every plain '#' comment the script skips: not character or description lines."""
+    """(line number, text) of every plain '#' comment the script skips: not character, description, media or
+    location lines."""
+    from places import LOCATION_LINE
+    used = (CHARACTER_LINE, DESCRIPTION_LINE, MEDIA_LINE, LOCATION_LINE)
     return [(n, line.strip()) for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1)
-            if line.strip().startswith("#") and not CHARACTER_LINE.match(line.strip())
-            and not DESCRIPTION_LINE.match(line.strip())]
+            if line.strip().startswith("#") and not any(r.match(line.strip()) for r in used)]
 
 
 def parse_characters(path):
@@ -249,16 +255,34 @@ def tts_kokoro(text, out, voice, speed):
     sf.write(str(out), samples, sr)
 
 
+def chatterbox_or_fallback(scenes, args):
+    """Chatterbox lines from Kaggle ({index: wav}), or None after switching args to the Edge fallback voice."""
+    import chatterbox_tts
+    lines = chatterbox_tts.narrate_lines(scenes, args)
+    if lines is None:
+        args.engine = "edge"
+        if not (args.voice or "").endswith("Neural"):
+            args.voice = chatterbox_tts.FALLBACK_VOICE
+        print(f"  Falling back to the Edge voice {args.voice or chatterbox_tts.FALLBACK_VOICE} for the whole video "
+              "(never two voices in one video).")
+    return lines
+
+
 def narrate(scenes, work, args):
+    made = chatterbox_or_fallback(scenes, args) if args.engine == "chatterbox" else None
+    speed = 1 + int(args.rate.rstrip("%")) / 100
     for i, s in enumerate(scenes):
         raw = work / f"vo_{i:03}.{'mp3' if args.engine == 'edge' else 'wav'}"
-        if args.engine == "edge":
+        tempo = ""
+        if made:  # Chatterbox has no speed setting, so --rate is applied afterwards (pitch kept)
+            raw = made[i]
+            tempo = f"atempo={min(2.0, max(0.5, speed)):.3f}," if abs(speed - 1) > 1e-3 else ""
+        elif args.engine == "edge":
             tts_edge(s["text"], raw, args.voice or "en-US-AriaNeural", args.rate)
         else:
-            speed = 1 + int(args.rate.rstrip("%")) / 100
             tts_kokoro(s["text"], raw, args.voice or "af_heart", speed)
         wav = work / f"vo_{i:03}_pad.wav"
-        run(["ffmpeg", "-y", "-i", raw, "-af", f"apad=pad_dur={PAUSE}", "-ar", "48000", "-ac", "2", wav])
+        run(["ffmpeg", "-y", "-i", raw, "-af", f"{tempo}apad=pad_dur={PAUSE}", "-ar", "48000", "-ac", "2", wav])
         s["dur"] = duration(wav)
         print(f"  scene {i + 1}: {s['dur']:.1f}s")
     lst = work / "audio.txt"
@@ -509,7 +533,7 @@ def mux(video, narration, args, out, cwd, filters=(), video_codec=None):
 
 # ---------- main ----------
 
-PATH_OPTIONS = {"font", "music", "output"}
+PATH_OPTIONS = {"font", "music", "output", "chatterbox_voice"}
 
 
 def load_config(ap):
@@ -544,16 +568,32 @@ def parse_args(argv=None):
     ap.add_argument("--format", choices=["both", *FORMATS], default="both",
                     help="which video(s) to render (default: both)")
     ap.add_argument("--vertical", action="store_true", help=argparse.SUPPRESS)  # deprecated
-    ap.add_argument("--engine", choices=["edge", "kokoro"], default="edge",
-                    help="edge = Microsoft neural voices (online); kokoro = fully offline")
+    ap.add_argument("--engine", choices=["edge", "kokoro", "chatterbox"], default="edge",
+                    help="edge = Microsoft neural voices (online); kokoro = fully offline; chatterbox = Chatterbox on a "
+                         "free Kaggle GPU (needs KAGGLE_API_TOKEN; falls back to Edge Emma if Kaggle fails)")
+    ap.add_argument("--chatterbox-voice", type=Path,
+                    help="chatterbox: a reference clip (6-15 s of clean speech) to speak in that voice, only one you have "
+                         "the right to use; default: Chatterbox's built-in voice")
+    ap.add_argument("--chatterbox-emotion", type=float, default=0.5,
+                    help="chatterbox: emotion / exaggeration, 0.25 (flat) to 2.0 (theatrical); default 0.5")
+    ap.add_argument("--chatterbox-cfg", type=float, default=0.5,
+                    help="chatterbox: lower (~0.3) keeps the pace natural at high emotion; default 0.5")
     ap.add_argument("--voice", help="edge default en-US-AriaNeural; kokoro default af_heart")
     ap.add_argument("--rate", default="+0%", help="speaking rate, e.g. +10%% or -5%%")
     ap.add_argument("--music", type=Path, help="background music, ducked under the voice and faded out")
     ap.add_argument("--music-volume", type=float, default=0.2, help="music level between sentences")
     ap.add_argument("--font", type=Path, default=DEFAULT_FONT,
                     help="TTF/OTF for captions and title cards (default: bundled Noto Sans Bold)")
-    ap.add_argument("--generate-visuals", action="store_true",
-                    help="AI images for scenes without a [visual:] line (see --image-provider)")
+    # on/off options you may set in make_video.toml also get a --no-... form to turn them off for one run
+    on_off = argparse.BooleanOptionalAction
+    ap.add_argument("--generate-visuals", action=on_off, default=False,
+                    help="AI images (or stock, see --media) for scenes without a [visual:] line (see --image-provider)")
+    ap.add_argument("--media", choices=["mixed", "stock", "ai"], default="mixed",
+                    help="with --generate-visuals: mixed = Pexels/Pixabay footage or photos where one matches well, "
+                         "else AI images (default); stock = stock wherever anything relevant exists; ai = never stock. "
+                         "'# media: ai' / '# media: stock' lines force a scene. --media stock turns on --generate-visuals")
+    ap.add_argument("--stock", choices=["auto", "pexels", "pixabay"], default="auto",
+                    help="stock provider: auto = every one with a key in .env (PEXELS_API_KEY, PIXABAY_API_KEY)")
     ap.add_argument("--image-provider", choices=ai_visuals.PROVIDERS, default="auto",
                     help="auto = Cloudflare, then Pollinations once Cloudflare's daily allowance is used up")
     ap.add_argument("--text-model", default=ai_visuals.TEXT_MODEL,
@@ -569,7 +609,7 @@ def parse_args(argv=None):
     ap.add_argument("--redo-scenes", default="", metavar='"3,7"',
                     help="draw only these scenes' images again with a new seed; every other scene keeps its cached "
                          "images and prompts (turns on --generate-visuals)")
-    ap.add_argument("--check-images", action="store_true",
+    ap.add_argument("--check-images", action=on_off, default=False,
                     help="look at every AI image with a Cloudflare vision model for extra or missing limbs, fingers or "
                          "faces and stray text; failures are redrawn with a new seed up to 2 times, then the best is kept "
                          "and flagged (~40 neurons a check)")
@@ -577,7 +617,7 @@ def parse_args(argv=None):
     ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL,
                     help="Workers AI image model: a short name (" + ", ".join(ai_visuals.IMAGE_MODELS) +
                          ") or a full @cf/... ID (default flux-2-klein-4b, ~132 neurons an image, one per format)")
-    ap.add_argument("--upscale", action="store_true",
+    ap.add_argument("--upscale", action=on_off, default=False,
                     help="sharpen scene images under 2048 px with Real-ESRGAN on a free Kaggle GPU, in one batch "
                          "(results are cached; needs KAGGLE_API_TOKEN in .env)")
     ap.add_argument("--renderer", choices=["remotion", "ffmpeg"], default="remotion",
@@ -587,6 +627,10 @@ def parse_args(argv=None):
     ap.add_argument("--no-branding", action="store_true", help="remotion: leave out the channel intro and outro")
     ap.add_argument("--no-parallax", action="store_true",
                     help="remotion: plain pans and zooms only (skips the depth model, ~1 s per image)")
+    ap.add_argument("--caption-style", choices=["auto", "bold", "clean", "minimal"], default="auto",
+                    help="remotion captions: bold = big words popping in 2-4 at a time; clean = one or two calm lines "
+                         "with the spoken word highlighted; minimal = a small plain line. auto (default) = bold for "
+                         "vertical, clean for horizontal")
     ap.add_argument("--no-captions", action="store_true")
     ap.add_argument("--whisper-model", default="base", help="tiny/base/small/medium")
     ap.add_argument("--caption-words", type=int, default=6, help="max words per caption line")
@@ -606,7 +650,7 @@ def parse_args(argv=None):
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
     args.redo = parse_scene_numbers(args.redo_scenes, ap)
-    args.generate_visuals |= args.prompts_only or bool(args.redo)
+    args.generate_visuals |= args.prompts_only or bool(args.redo) or args.media == "stock"
     return args
 
 
@@ -660,6 +704,12 @@ def main():
             print(f"Note: scene(s) {', '.join(map(str, own))} use your own [visual:] file, so --redo-scenes skips them.")
         providers = ai_visuals.Providers(args.image_provider, args.image_model, args.text_model,
                                          new_images=args.new_images, vision_model=args.vision_model)
+        plan = {}
+        if not args.prompts_only:
+            import script_check
+            import stock
+            plan = stock.fill_stock(scenes, formats, args.media, args.stock, providers,
+                                    script_check.estimated_seconds(scenes, args), parse_characters(script))
         failed_visuals = ai_visuals.generate_scene_visuals(
             scenes, base.with_name(base.name + "_prompts.json"), style=args.style, regenerate=args.regenerate,
             prompts_only=args.prompts_only, provider=args.image_provider, providers=providers,
@@ -667,6 +717,7 @@ def main():
         if args.prompts_only:
             print("Prompts only: review and edit the file above, then rerun with --generate-visuals.")
             return
+        stock.write_media_json(scenes, plan, base.with_name(base.name + "_media.json"))
     elif args.regenerate:
         print("Note: --regenerate only applies with --generate-visuals.")
     if args.upscale:

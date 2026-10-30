@@ -20,6 +20,7 @@ const preview: Props = {
   tagline: "Clever ideas from the world's villages",
   scenes: [],
   captions: [],
+  captionStyle: 'clean',
   places: [],
 };
 

@@ -5,6 +5,7 @@ export const BRAND = {
   night: '#0E2A3B',
   nightLight: '#1C4A63',
   white: '#FFFFFF',
+  sky: '#8FD8FF', // key words in the calmer caption styles, apart from the yellow spoken word
 };
 
 export const FONT = 'BrandFont';

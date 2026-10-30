@@ -1,0 +1,54 @@
+# Five Village Water Hacks That Beat Drought
+# note: Example script from SCRIPT_GUIDE.md. Copy it, keep the structure, replace the content.
+# character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
+
+# HOOK - Visuals: Smart Village Boy kneeling on a cracked, dry riverbed in rural Kenya at sunrise, holding up a handful of damp sand in one open palm.
+[video] This river has been dry for months. Yet dig into the sand and you find water. Today we visit five villages that have learned to catch every drop.
+
+# Visuals: Smart Village Boy standing beside a large wooden globe on a Kenyan hilltop at sunrise, pointing at one of five small blue pins stuck into it.
+Welcome to Smart Village Boy, where we explore the cleverest ideas from the world's villages. Stay to the end for a pot that waters plants by itself.
+
+# HACK 1 KENYA - Visuals: A wide seasonal riverbed of pale sand in Kitui, Kenya, in the dry season, with a low concrete wall built straight across it and acacia trees on the banks.
+# location: Kitui, Kenya
+In the dry hills of eastern Kenya, many rivers flow for only a few weeks a year. So villagers build a low concrete wall straight across the riverbed.
+
+# Visuals: Brown floodwater pouring over the low concrete wall in the Kenyan riverbed during the rainy season, with wet sand piled up behind the wall.
+[video] When the rains come, the floodwater carries sand that piles up behind the wall. The sand holds water like a sponge and shields it from the hot sun.
+
+# Visuals: Two Kenyan women filling yellow jerrycans from a hand pump beside the sand-filled riverbed on a hot afternoon.
+Months later, villagers pump filtered water from a shallow well beside it. This is a sand dam, and it keeps water flowing long after the rains have gone.
+
+# HACK 2 BURKINA FASO - Visuals: An elderly farmer in a long robe and a knitted cap digging a small round pit in hard, crusted earth with a short hand hoe in Burkina Faso in the dry season.
+In Burkina Faso, a farmer named Yacouba Sawadogo watched drought turn his fields into a hard crust. He revived an old farming technique called zai.
+
+# Visuals: Close view of a hand dropping dark compost into a small round pit in dry, cracked soil, with rows of identical pits behind it.
+Farmers dig small pits across the field and fill each one with compost. Termites come for the compost and dig tunnels that help rain soak deep into the ground.
+
+# Visuals: Green millet seedlings growing out of rows of small round pits in a once-bare field in Burkina Faso after the first rains, with young trees in the distance.
+[video] When the rains arrive, every drop stays where the seeds need it. On land where nothing grew, millet and even trees began to return.
+
+# HACK 3 IRAN - Visuals: A dry desert plain in central Iran stretching toward distant brown mountains on a clear morning, with a straight line of round earth mounds crossing it.
+# media: stock
+In Iran, desert villages have drawn water from the mountains for thousands of years. The secret is a line of shafts you can spot from the air.
+
+# Visuals: A gently sloping underground tunnel of bare earth with a shallow stream of clear water flowing along its floor, lit by a beam of daylight from a shaft above.
+# media: ai
+Each shaft leads down to a gently sloping tunnel called a qanat. It carries groundwater from the mountains to the village using only gravity, and many still flow today.
+
+# HACK 4 MEGHALAYA - Visuals: Two Khasi farmers on a steep, forested hillside in Meghalaya, India, in the morning, fitting lengths of split bamboo together into a long open channel.
+In the hills of Meghalaya in India, Khasi and Jaintia farmers build water pipes from bamboo. The channels carry stream water down steep slopes to their plantations.
+
+# Visuals: Clear stream water running along a narrow split bamboo channel on a green hillside in Meghalaya and falling in small drops onto the base of a betel leaf vine.
+[video] Each channel is made narrower as it goes. By the time it reaches the plants, a rushing stream has become a gentle drip right at the roots.
+
+# HACK 5 THE OLLA - Visuals: Smart Village Boy kneeling in a small vegetable garden in rural Kenya in the late afternoon, lowering an unglazed clay pot into a hole beside young tomato plants.
+Our last hack is one you can try at home. Bury an unglazed clay pot up to its neck beside your plants, and fill it with water.
+
+# Visuals: Close view of a hand pouring water from a metal jug into the open neck of a clay pot buried in dark soil beside young tomato plants in a Kenyan garden.
+The water seeps slowly through the clay, right where the roots are. Farmers have watered crops this way for centuries, and it uses much less water than a watering can.
+
+# OUTRO - Visuals: Smart Village Boy sitting beside the wooden globe on the Kenyan hilltop at sunset, smiling at the five blue pins.
+Sand that holds a river, pits that catch the rain, tunnels, bamboo pipes and a buried pot. Five ideas, and not one of them needs electricity.
+
+# Visuals: Smart Village Boy waving towards the viewer on the Kenyan hilltop at dusk, with the first stars appearing above the village.
+Which of these would work where you live? Tell us in the comments, and subscribe for more village ideas.

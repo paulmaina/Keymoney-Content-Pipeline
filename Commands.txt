@@ -1,1 +1,282 @@
-python make_video.py Scripts\Script1_voiceover.txt --generate-visuals --voice en-US-AndrewMultilingualNeural --rate +20% --style "Cinematic documentary style, natural lighting, realistic, respectful depiction of local people and traditional dress"
+AI VIDEO EDITOR - RUNBOOK
+=========================
+From script to YouTube upload. Run every command in PowerShell from the project folder:
+
+    cd "K:\AI Video Editor"
+
+README.md has the full detail on every feature. Keep this file up to date whenever an option, default or step changes.
+
+
+1. ONE-TIME SETUP
+-----------------
+1. Install the tools (open a NEW terminal afterwards so they're on the PATH):
+       winget install Python.Python.3.14        (3.11 or newer; this PC uses 3.14)
+       winget install Gyan.FFmpeg
+       winget install OpenJS.NodeJS.LTS
+
+2. Make the Python environment and install the packages:
+       python -m venv .venv
+       .venv\Scripts\python -m pip install -r requirements.txt
+
+3. Models:
+   - Downloaded automatically on first use: the Whisper caption model (~140 MB), the parallax depth model (99 MB, in models\),
+     the face detector (230 KB, in models\) and Remotion's packages (~250 MB, in remotion\node_modules).
+   - Only for the offline voice (--engine kokoro), download the Kokoro voice (~340 MB) once:
+       .venv\Scripts\python download_models.py
+
+4. Keys: copy .env.example to .env and fill it in. .env is gitignored: never commit it, share it or paste it anywhere.
+       copy .env.example .env
+       notepad .env
+
+       CLOUDFLARE_ACCOUNT_ID=     dash.cloudflare.com > AI > Workers AI > Use REST API > Account ID
+       CLOUDFLARE_API_TOKEN=      same page > Create a Workers AI API Token (Workers AI Read + Edit)
+       KAGGLE_API_TOKEN=          kaggle.com > Settings > API Tokens > Generate New Token (the new-style token,
+                                  not kaggle.json). Kaggle may ask you to verify your phone for GPU + internet.
+       PIXABAY_API_KEY=           pixabay.com/api/docs/ (sign in; the key is shown on the page)
+       PEXELS_API_KEY=            pexels.com/api/ (optional; used automatically once it's there)
+       POLLINATIONS_API_KEY=      optional image fallback, enter.pollinations.ai (starts with sk_)
+
+   What each is for:
+       Cloudflare  image prompts, AI images, the image quality check, stock scoring, YouTube titles/description
+       Kaggle      the Chatterbox voice and --upscale (free GPU)
+       Pixabay /
+       Pexels      stock footage and photos (use either or both; with neither, every scene gets an AI image)
+
+5. Check that it works (no network, nothing is spent):
+       .venv\Scripts\python -m pytest -q
+       .venv\Scripts\python make_video.py Scripts\Script2.txt --check
+
+Your defaults are in make_video.toml. Currently:
+    generate-visuals = true    stock or AI images for every scene without [visual:]
+    check-images = true        vision check for extra fingers/limbs/faces and stray text; failures are redrawn
+    upscale = true             Real-ESRGAN sharpening on Kaggle
+    engine = "chatterbox"      Chatterbox "natural" voice (emotion 0.5, cfg 0.5); falls back to Emma
+    voice = Emma Multilingual, rate = +5%, media = "mixed", stock = "auto", caption-style = "auto",
+    style = photorealistic documentary photography
+Options typed on the command line always win over the file.
+
+
+2. SCRIPT FORMAT
+----------------
+Save a .txt file in Scripts\. Each paragraph (separated by a blank line) is one scene: 2-3 spoken sentences,
+15-17 paragraphs (at most 20) and 400-430 words, so the video stays under 3 minutes and the vertical one is a Short.
+The full standard is SCRIPT_GUIDE.md (give it to your scripting project); Scripts\TEMPLATE.txt is a worked example:
+copy it to start a new script.
+
+    # character: Name = description    A recurring INVENTED person: age, origin, build, hair, clothes, colours. Keeps them
+                                       the same in every scene that names them. Never a real person: describe real
+                                       people by role and clothing in the # Visuals lines instead.
+    # Visuals: ...                     What the scene shows (inside the paragraph). Drives the image prompt and the stock
+                                       search. Never spoken. Can carry a chapter heading: "# HACK 1 NIGERIA - Visuals: ..."
+    [video]                            At the start of a line: a stronger camera move for an action scene (use 4-5).
+    [visual: file.jpg]                 At the start of a line: use your own image or clip (from "Raw Footage\" or next
+                                       to the script). Always wins.
+    # media: ai   /   # media: stock   Force this scene to an AI image or to stock footage.
+    # location: Nakuru, Kenya          Set the scene's place label and map pin. "# location: none" removes one.
+                                       Only needed when the automatic label is missing or wrong.
+    # anything else                    A comment: never spoken, captioned or used in prompts.
+
+Tags only count at the start of a line. Write visual descriptions on # Visuals lines, never in the narration
+(narration is read aloud). All-caps headings (HOOK, HACK 1 NIGERIA, ...) become YouTube chapters.
+
+Short example:
+
+    # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, green T-shirt
+    # note: this line is a comment
+
+    # HOOK - Visuals: Smart Village Boy on a Kenyan hilltop at sunrise, holding a clay pot
+    No electricity. No fridge. No running water. Yet villagers keep their food cold.
+
+    # HACK 1 NIGERIA - Visuals: hands placing a small clay pot inside a larger one in a schoolyard
+    # media: ai
+    [video] In northern Nigeria, a teacher set one clay pot inside a bigger one.
+    He filled the gap with wet sand.
+
+    # Visuals: thick white sea fog rolling over dry coastal hills
+    # location: Atacama Desert, Chile
+    In Chile's Atacama Desert, villagers catch water from the fog.
+
+
+3. THE NORMAL WORKFLOW
+----------------------
+1. Research (optional), in Claude Code:   /research-topic water storage village hacks
+2. Write the script in Scripts\ (format above).
+3. Fact-check it, in Claude Code:          /fact-check Scripts\MyVideo.txt
+   Read Research\MyVideo_factcheck.md and soften anything not confirmed.
+4. Check it (free, no network):
+       .venv\Scripts\python make_video.py Scripts\MyVideo.txt --check
+   Fix every flag. Make sure the Cloudflare total fits today's 10,000 neurons (see section 5).
+5. Optional: review the image prompts first (costs only ~50 neurons a scene):
+       .venv\Scripts\python make_video.py Scripts\MyVideo.txt --prompts-only
+   Edit Exports\MyVideo_prompts.json or the # Visuals lines, then carry on.
+6. Render:
+       .venv\Scripts\python make_video.py Scripts\MyVideo.txt
+   That's the whole command: stock or AI visuals, image checks, upscaling, the Chatterbox voice, captions, both formats,
+   and the YouTube notes. A 19-scene video takes about 15-25 minutes, plus a few minutes of Kaggle queueing.
+7. Review the outputs in Exports\:
+       MyVideo_horizontal.mp4    1920x1080, for YouTube
+       MyVideo_vertical.mp4      1080x1920, for Shorts / Reels / TikTok
+       MyVideo.srt               captions
+       MyVideo_youtube.md        title options, description with chapters, tags, hashtags
+       MyVideo_thumbnail.jpg     1280x720 thumbnail
+       MyVideo_prompts.json      the image prompts and character sheet (edit, then rerun)
+       MyVideo_media.json        which scenes use stock, from where, and the creators to credit
+   Watch both videos. Look for extra fingers or limbs (the log lists images the check flagged), wrong people, a
+   stock clip that doesn't fit, captions or labels over a face, and mispronounced words.
+8. Fix what's wrong and rerun (only the changed parts are redone):
+       a bad image:          --redo-scenes "3,7"
+       a bad stock pick:     add "# media: ai" to that scene
+       a wrong shot:         edit its # Visuals line (or its prompt in _prompts.json)
+       a mispronounced word: spell it the way it's said in the narration
+9. Upload with MyVideo_youtube.md:
+   - Pick one of the 3 titles; paste the description (it has the chapters, the AI/stock note and the stock credits)
+     and the tags.
+   - Upload MyVideo_thumbnail.jpg as the thumbnail.
+   - Under "Altered or synthetic content", answer YES (realistic AI images and an AI voice).
+   - Upload MyVideo_vertical.mp4 separately as a Short (Shorts must be 3 minutes or less).
+
+
+4. COMMANDS
+-----------
+All start with:  .venv\Scripts\python make_video.py Scripts\MyVideo.txt  ...
+
+Planning
+    --check                     Scene list, word counts, estimated length, flags, the Cloudflare neurons, Kaggle
+                                time and render time. Changes nothing, no network. Add any options you'll render with
+                                (e.g. --check --new-images) to see their cost.
+    --prompts-only              Write Exports\MyVideo_prompts.json, then stop.
+
+Rendering
+    (no options)                The full render with your make_video.toml defaults.
+    --format vertical           Only the vertical video (or horizontal; default both). Halves the image cost.
+    -o Exports\MyVideo_v2       Different output names. NOTE: prompts are saved per output name, so a new -o writes
+                                new prompts and images. Script2's realistic render was saved as -o Exports\Script2_realistic.
+    --no-metadata               Skip the YouTube notes and thumbnail.
+    --music "Raw Footage\song.mp3"   Background music, ducked under the voice.
+
+Images
+    --redo-scenes "3,7"         Redraw only those scenes (numbers as --check shows them); everything else stays cached.
+    --new-images                Redraw every image with a new seed (keeps the prompts). Costs the full image budget again.
+    --regenerate                Rewrite all prompts AND redraw all images (your prompt edits are lost).
+    --no-check-images           Skip the vision check this run (saves ~40 neurons an image).
+    --no-upscale                Skip Kaggle upscaling this run (quick drafts).
+    --no-generate-visuals       No stock or AI images: Raw Footage\ files in order, else text cards.
+    --image-model flux-2-klein-4b   The default. Others cost far more; see README "Image models".
+
+Stock footage
+    --media mixed               Default: stock where it matches well (score 7/10+), AI images elsewhere. Scenes naming a
+                                # character stay AI so the person looks the same.
+    --media stock               Stock wherever anything relevant exists.
+    --media ai                  Never stock.
+    --stock auto                Default: every provider with a key. Or --stock pixabay / --stock pexels.
+
+Voice
+    (default)                   Chatterbox "natural" on Kaggle. Each line is cached; falls back to Emma if Kaggle fails.
+    --engine edge               Emma (Edge voice), no Kaggle. Good for quick drafts.
+    --engine kokoro --voice am_michael   Offline voice (after download_models.py).
+    --rate +10%                 Faster (or -5% slower). Default +5%.
+    --chatterbox-emotion 0.35   0.25 flat ... 2.0 theatrical (default 0.5). Above ~0.7 also use --chatterbox-cfg 0.3.
+    --chatterbox-voice voices\me.wav   Speak in a reference voice (6-15 s clean speech). ONLY a voice you have the
+                                right to use: your own, or with the speaker's written permission.
+
+Captions and look
+    --caption-style auto        Default: bold in the vertical video, clean in the horizontal.
+    --caption-style bold        Big words popping in (or clean / minimal) for both videos.
+    --no-captions               No captions.
+    --no-branding               No intro and outro.
+    --renderer ffmpeg           Fast plain render (no Remotion motion, map or intro).
+
+Other tools
+    Chatterbox voice samples (one Kaggle run, ~2-3 min GPU), into Exports\voice_samples\:
+        .venv\Scripts\python chatterbox_tts.py
+        .venv\Scripts\python chatterbox_tts.py --text "Your own line." --voice voices\me.wav
+    Research (Claude Code skill):   /research-topic <topic>   -> Research\<topic>.md
+        or directly:  .venv\Scripts\python research.py "water storage village hacks" --max 15
+    Fact-check (Claude Code skill): /fact-check Scripts\MyVideo.txt   -> Research\MyVideo_factcheck.md
+    Tests:                          .venv\Scripts\python -m pytest -q
+
+
+5. LIMITS AND COSTS
+-------------------
+Cloudflare Workers AI: 10,000 free neurons a day.
+    Resets at 00:00 UTC = 03:00 Nairobi time (EAT, UTC+3). (Once, on 29 Oct 2026, it accepted calls again earlier
+    than that, around 22:12 Nairobi time, so it's worth a try before 03:00.)
+    A first render of a 19-scene script, both formats:
+        images ~5,000 + quality checks ~1,550 + prompts ~880 + titles ~70 + stock scoring (a little)  = about 7,500
+    Redrawn images add ~132 + ~40 each. Cached reruns cost almost nothing. --check shows the total first.
+
+Kaggle: about 30 free GPU hours a week (Kaggle's Settings page shows what's left and when it resets).
+    Upscaling 38 images: ~2 min. Chatterbox: ~35 s to load plus roughly the speech length (a 3-minute video is
+    likely 5-10 min). Each run has a hard time limit, so a stuck run can't use up the week.
+
+Pixabay: 100 searches a minute. Pexels: 200 an hour. Searches are cached for 24 hours and downloads are kept, so
+reruns don't search again.
+
+When the Cloudflare allowance runs out:
+    - The run carries on: images come from Pollinations if POLLINATIONS_API_KEY is set, else those scenes become text
+      cards. Prompts fall back to simple ones built from the scene text.
+    - Better: stop, wait until 03:00 Nairobi, and rerun the same command. Everything already made is cached, so it
+      continues where it stopped.
+    - To fit a day: --format vertical (half the images), --no-check-images, or --media stock / mixed (stock costs no
+      image neurons), or redo only some scenes with --redo-scenes.
+When Kaggle hours run out: --engine edge (Emma) and --no-upscale render without Kaggle.
+
+
+6. TROUBLESHOOTING
+------------------
+"ffmpeg not found" / "npx is not recognized"
+    Install FFmpeg / Node.js (section 1) and open a NEW terminal. Without Node.js the video renders with plain FFmpeg.
+
+"Visual(s) not found: ..." before any audio is made
+    A [visual: ...] file isn't in "Raw Footage\" or next to the script. Fix the name or remove the line.
+
+Cloudflare 429 / "daily allowance used up" / scenes became text cards
+    Section 5. Rerun after 03:00 Nairobi; cached work is kept.
+
+Cloudflare 401 / 403
+    CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN in .env is wrong or expired. Make a new Workers AI token.
+
+"needs KAGGLE_API_TOKEN" / "Kaggle rejected KAGGLE_API_TOKEN"
+    Generate a new token on Kaggle (Settings > API Tokens) and put it in .env. Until then the voice falls back to
+    Emma and upscaling is skipped; the video still renders.
+
+Kaggle run waits "queued" for a long time
+    Free GPUs can queue for several minutes. Ctrl+C stops WATCHING, not the run; rerun later and only the missing
+    work is sent.
+
+"Falling back to the Edge voice" in the log
+    Chatterbox failed or a line was missing, so the whole video uses Emma (never two voices). Rerun to retry; the
+    finished lines are cached.
+
+Chatterbox says "uh" or rushes
+    Lower --chatterbox-emotion (0.5 or less) or raise --chatterbox-cfg back to 0.5.
+
+A person has extra fingers or arms, or looks wrong
+    --redo-scenes "N". If it keeps happening, simplify the # Visuals line (one clear action, hands visible and
+    relaxed), or describe an invented person in a # character: line (SCRIPT_GUIDE.md 2.2).
+
+A real person (e.g. Sonam Wangchuk) doesn't look right
+    Describe them by role, age and clothing in that scene's # Visuals line (the same words in every scene they're in),
+    then --redo-scenes "N". Real people are never drawn as their actual likeness.
+
+A stock clip doesn't match the scene
+    Add "# media: ai" to that paragraph and rerun. Exports\MyVideo_media.json shows each pick and its score.
+
+"The style changed ... every prompt is written again" in --check
+    The style in make_video.toml or .env differs from the one the saved prompts were written for, or you used a new
+    -o name. Use the old -o name to reuse its prompts and images.
+
+Wrong or missing place label / map
+    Add "# location: Place, Country" (or "# location: none") to that scene.
+
+Edge voice fails (no internet)
+    --engine kokoro --voice am_michael (offline, after download_models.py).
+
+research.py stops with "blocked"
+    YouTube is limiting your IP. Rerun later; transcripts already saved are reused.
+
+An error mentioning cv2 / OpenCV
+    .venv\Scripts\python -m pip install -r requirements.txt   (OpenCV must stay below version 5).
+
+Anything else
+    Run --check first, and keep the log. Rerunning the same command is always safe: finished work is cached.

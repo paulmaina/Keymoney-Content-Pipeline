@@ -37,6 +37,9 @@ place labels, a world map with a pin for each new country, and a short branded i
 For hand editing, [Shotcut](https://shotcut.org) (`winget install Meltytech.Shotcut`) works well with the exported MP4s and `.srt`.
 
 ## Writing a script
+[SCRIPT_GUIDE.md](SCRIPT_GUIDE.md) is the full standard for writing scripts (format, writing rules, channel style, length and
+cost, a fact-check checklist), with `Scripts/TEMPLATE.txt` as a worked example that a test keeps passing `--check`.
+
 Save a `.txt` file in `Scripts/`. The recommended format is **one paragraph per scene**, separated by blank lines,
 with 2–3 spoken sentences each and 15–20 paragraphs in all:
 
@@ -88,12 +91,21 @@ render with (`--generate-visuals --new-images --upscale`) to see their cost.
 Options you always use go in `make_video.toml` in the project folder, written like the command-line option without the dashes:
 ```toml
 [defaults]
+generate-visuals = true     # stock or AI images for every scene without [visual:]
+check-images = true         # vision check for anatomy errors and stray text (~40 neurons an image)
+upscale = true              # sharpen images on Kaggle (cached)
 style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
-voice = "en-US-EmmaMultilingualNeural"
+engine = "chatterbox"       # the "natural" Chatterbox voice on Kaggle (see below); "edge" for Emma without Kaggle
+chatterbox-emotion = 0.5
+chatterbox-cfg = 0.5
+voice = "en-US-EmmaMultilingualNeural"   # the Edge voice, also the fallback if Chatterbox can't run
 rate = "+5%"
 ```
 Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the file. Options typed on the command line always win
-(`--style ""` turns the style off for one run). Unknown keys are reported, not silently ignored.
+(`--style ""` turns the style off for one run). On/off options set in the file have a `--no-` form for one run:
+`--no-generate-visuals`, `--no-check-images`, `--no-upscale`. Unknown keys are reported, not silently ignored.
+With these defaults, the whole command is `.venv\Scripts\python make_video.py Scripts\my_video.txt`.
+[Commands.txt](Commands.txt) is a plain-text runbook of setup, the workflow, every command, limits and troubleshooting.
 
 ## Making the video
 ```
@@ -106,20 +118,24 @@ Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the f
 | `--renderer ffmpeg` | Plain FFmpeg rendering: one slow zoom per image, burned-in captions, no intro. Much faster (default `remotion`) |
 | `--no-branding` | Remotion: leave out the channel intro and outro |
 | `--no-parallax` | Remotion: plain pans and zooms only (skips the depth model) |
+| `--caption-style bold` | Remotion captions: `bold`, `clean` or `minimal` for both formats (default `auto`: bold vertical, clean horizontal) |
 | `-o Exports\promo` | Base name for outputs, giving `promo_horizontal.mp4`, `promo_vertical.mp4` and `promo.srt` |
 | `--engine kokoro` | Offline voice instead of Microsoft's online voices |
+| `--engine chatterbox` | Chatterbox voice made on a free Kaggle GPU (see [Chatterbox voice](#chatterbox-voice-on-kaggle---engine-chatterbox)); `--chatterbox-voice`, `--chatterbox-emotion`, `--chatterbox-cfg` |
 | `--voice en-US-GuyNeural` | Choose a voice (defaults: `en-US-AriaNeural` online, `af_heart` offline) |
 | `--rate +10%` | Speak faster (or `-10%` slower) |
 | `--music "Raw Footage\song.mp3"` | Background music. It drops while the voice speaks and fades out over the last 2 seconds |
 | `--music-volume 0.2` | Music level between sentences |
 | `--font path\to\font.ttf` | Font for captions and title cards (default: bundled Noto Sans Bold) |
-| `--generate-visuals` | AI images for scenes without a `[visual:]` line (see below) |
+| `--generate-visuals` | AI images for scenes without a `[visual:]` line (see below); on in `make_video.toml`, `--no-generate-visuals` turns it off |
 | `--style "cinematic, warm tones"` | Added to every AI image prompt |
 | `--prompts-only` | Write the AI image prompts for review, then stop (no images, audio or video) |
 | `--regenerate` | Ignore cached AI images and saved prompts for this run (your edited prompts are rewritten) |
 | `--new-images` | Keep the saved prompts but draw every image again; the new ones replace the cached ones |
 | `--redo-scenes "3,7"` | Draw only those scenes' images again with a new seed; everything else stays cached (turns on `--generate-visuals`) |
 | `--check-images` | A vision model checks every AI image for extra or missing limbs, fingers or faces and stray text; failures are redrawn up to 2 times (see [Quality check](#quality-check---check-images)) |
+| `--media mixed` | With `--generate-visuals`: `mixed` (default) uses Pexels/Pixabay footage or photos where one matches well and AI images elsewhere; `stock` uses stock wherever anything relevant exists; `ai` never uses stock (see [Stock footage](#stock-footage-and-photos-pexels-and-pixabay)) |
+| `--stock auto` | Stock provider: `auto` (every one with a key), `pexels` or `pixabay` |
 | `--image-provider auto` | Where AI images come from: `auto` (default), `cloudflare` or `pollinations` (see below) |
 | `--image-model flux-2-klein-4b` | The Workers AI image model, by short name or `@cf/...` ID (see [Image models](#image-models)) |
 | `--text-model @cf/...` | A different Workers AI model for writing prompts (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) |
@@ -154,11 +170,27 @@ headless Chrome on your PC. The voice and music are then mixed by FFmpeg exactly
   image has a clear subject standing in front of a backdrop (in Script2: the market vendor, the two farmers, the globe's pins), not on
   walls, aerial views or close-ups, where it would wobble. Masks are cached next to the images.
 - **Crossfades** between scenes, centred on the moment the narration moves on.
-- **Captions** pop in line by line, with the spoken word in yellow. The `.srt` is still written (shifted to match the intro).
+- **Captions** have their own style per format (`--caption-style`, or `caption-style` in `make_video.toml`):
+
+  | Style | Look | Default for |
+  |---|---|---|
+  | `bold` | Big bold capitals, 2–4 words a line, each word popping in as it's spoken, with a thick outline and shadow | vertical |
+  | `clean` | One or two calm lines that fade in, the spoken word in yellow | horizontal |
+  | `minimal` | A small plain line at the bottom, no highlight | |
+
+  **Key words** (numbers, places, names, and named hacks such as "the zeer", "Liter of Light" or "an ice stupa") are coloured and a
+  little bigger: yellow in `bold`, light blue in the others. Vertical captions sit in the lower third, above YouTube Shorts' title and
+  description and left of its button column, and below the map and place labels. Each line is placed so it **doesn't cover a face**:
+  OpenCV's YuNet face detector (MIT, 230 KB, downloaded once into `models/`) finds the faces in the scene's picture, and a line that
+  would cover one moves up or down. Faces are cached next to each image. Captions use the narration's word timings, so they stay in
+  sync with the voice. The `.srt` is still written (shifted to match the intro); `--renderer ffmpeg` burns in a plain line.
 - **Place labels** ("Northern Nigeria", "Ladakh, India") when the narration reaches a new place, and a **world map** that flies to
   each new country and drops a pin, with a dotted line from the last one. Places come from the narration only: country names,
   directions ("northern Nigeria"), known regions (Ladakh, Meghalaya, Atacama, ...), or a name the `# Visuals:` line places
   ("Tharu, Nepal"). Add `# location: Nakuru, Kenya` to a scene to set it, or `# location: none` to stop a label.
+  In the vertical video, a map or label that would cover a face (the vendor in a market, say) moves down below it, the map
+  shrinking to fit above the captions with its label inside it, and the captions take their lowest slot while it shows. Small faces in a background
+  crowd may still be covered; if there's no room under the face for a useful map, it stays at the top.
 - **Branding**: a 2-second intro (rising sun, channel name, tagline) and a 3.5-second "Thanks for watching / Subscribe" outro,
   in the channel's red, yellow and night blue. `--no-branding` leaves them out. YouTube chapters account for the intro.
 
@@ -335,7 +367,8 @@ learned character description is written again; your `# character:` lines are ke
 ### Character consistency
 Image models draw each scene separately, so the same character can look different from scene to scene. To keep them consistent:
 1. **Declare them** with `# character: Name = description` lines in the script: age, origin, build, hair, clothing and colours.
-   Do this for real people the script names (Script2 declares Sonam Wangchuk), so they're drawn as described rather than guessed.
+   Declare **invented characters only** ([SCRIPT_GUIDE.md](SCRIPT_GUIDE.md)): describe a real person by role, age and clothing in
+   the `Visuals:` lines instead ("an elderly farmer in a long robe and a knitted cap"), the same words each time.
 2. When a scene's narration or `Visuals:` line names a character, using any distinctive word of the name ("Kofi" or "Grandpa" for
    "Grandpa Kofi"; role words like "villagers" or "farmer" don't count), the prompt writer gets their sheet entry and is told to
    describe them exactly as listed. Characters the scene doesn't name aren't shown to it.
@@ -361,6 +394,74 @@ estimated usage, and `--check` shows it beforehand. Past the free allowance, Clo
 
 Realistic AI images need to be labelled as synthetic content on YouTube ("altered or synthetic content"), especially when they show
 a real person or place. The YouTube notes say so.
+
+## Chatterbox voice on Kaggle (`--engine chatterbox`)
+```
+.venv\Scripts\python make_video.py Scripts\my_video.txt --generate-visuals --engine chatterbox
+```
+[Chatterbox](https://github.com/resemble-ai/chatterbox) (Resemble AI, MIT licence) is an expressive open voice model. It needs a GPU,
+so every narration line goes to a free Kaggle T4 **in one batch** (`kaggle/chatterbox.ipynb`, the same private dataset and kernel
+runner as `--upscale`), the audio comes back, and the render finishes locally as usual. The GPU time is printed at the end.
+
+- **Voice:** Chatterbox's built-in voice by default. To speak in another voice, set `chatterbox-voice` to a 6–15 second clip of
+  clean speech. **Only use a voice you have the right to use: your own, or one whose speaker has given you permission.**
+- **Emotion:** `chatterbox-emotion` from 0.25 (flat) to 2.0 (theatrical), default 0.5. Above about 0.7, a lower `chatterbox-cfg`
+  (about 0.3, default 0.5) keeps the pace natural. `--rate` still applies (as a tempo change that keeps the pitch).
+- **Cache and resume:** each line is cached in `generated/voice/`, keyed by its text and every setting that changes the sound (the
+  reference clip's contents, emotion, cfg, model version), so a rerun only sends new or edited lines. If a run stops part-way, the
+  lines it finished are kept and the next run sends only the rest.
+- **Default:** `make_video.toml` sets `engine = "chatterbox"` with the "natural" settings (emotion 0.5, cfg 0.5), so every render
+  uses it. `--engine edge` makes one render with Emma without Kaggle.
+- **Fallback:** if Kaggle fails, `KAGGLE_API_TOKEN` is missing or any line is missing, the whole video uses the Edge voice (Emma,
+  or your toml voice), so a video never mixes two voices.
+- Chatterbox adds Resemble's imperceptible Perth watermark to its audio. The YouTube notes already say the narration is an AI voice.
+- **Samples:** `.venv\Scripts\python chatterbox_tts.py` speaks one line at three settings (natural 0.5/0.5, calm 0.35/0.6,
+  lively 0.8/0.3) in one Kaggle run, plus Edge Emma, into `Exports/voice_samples/`. Add `--voice <clip>` to try a reference voice.
+  Measured October 2026: the three 8-second samples took a **2.4-minute** GPU session (35 s to load the model). The lively
+  setting added an "Uh" before the first word, so listen for fillers when you raise the emotion or lower the cfg.
+
+```toml
+engine = "chatterbox"
+chatterbox-voice = "voices/my_voice.wav"   # optional; a voice you have the right to use
+chatterbox-emotion = 0.5
+chatterbox-cfg = 0.5
+```
+
+## Stock footage and photos (Pexels and Pixabay)
+With `--generate-visuals`, scenes can use real stock footage or photos instead of an AI image. Add free keys to `.env` as
+`PEXELS_API_KEY` and/or `PIXABAY_API_KEY` ([pexels.com/api](https://www.pexels.com/api/), [pixabay.com/api/docs](https://pixabay.com/api/docs/));
+whichever exist are used, and with neither the run goes straight to AI images.
+
+1. **Queries.** For each scene, `@cf/meta/llama-3.1-8b-instruct-fp8-fast` writes 2–3 short search queries from its `Visuals:` line and
+   narration (no people's names). Without Cloudflare, they're built from the description's key phrases.
+2. **Search.** Videos first, then photos only if no video fits every format. Only real footage and photographs are asked for
+   (Pixabay `video_type=film`, `image_type=photo`; Pexels has no illustrations).
+3. **Score.** Every result from both providers is scored together. The same small model rates how well each result's description
+   (Pexels) or tags (Pixabay) match the scene, 0–10; without Cloudflare, shared keywords are counted instead. Each result then gets
+   up to +4: +1 for video, +1 if it's sharp at 1080p for that format, +1 for the format's orientation, and +1 if a clip is at least as
+   long as the narration. The best result wins **for each format**, so the vertical video can use a portrait clip. Pexels wins a tie.
+4. **Fallback.** A provider that fails or hits its rate limit is skipped for the rest of the run and the other is used; a scene
+   with no good match gets the Cloudflare AI image.
+
+| `--media` | Stock is used when |
+|---|---|
+| `mixed` (default) | the best result scores 7+ out of 10. Scenes that name a `# character:` keep AI images, so recurring characters look the same |
+| `stock` | anything scores 4+; AI only when nothing relevant is found |
+| `ai` | never |
+
+`# media: stock` or `# media: ai` inside a paragraph forces that scene. Both options can go in `make_video.toml`.
+
+- **In the video:** stock photos get the same camera moves and parallax as AI images, and stock clips play as moving video,
+  cover-cropped to each format and looped if they're shorter than the scene. Downloads are 1080p-class files (no 4K), and Pixabay
+  photos are at most 1280 px, so they look soft in the vertical video: `--upscale` sharpens them.
+- **Caching and limits:** searches are cached for 24 hours (Pixabay's terms ask for it) and downloads for good, in `generated/stock/`.
+  Pixabay allows 100 requests a minute, Pexels 200 an hour; the limits are read from the response headers and remembered, a short
+  Pixabay wait is sat out, and a long block switches to the other provider. A 19-scene video needs about 3–6 searches per provider per scene the first time.
+- **Credits:** `Exports/<name>_media.json` lists each scene's choice (stock, AI, your own file, title card), the provider, the
+  creator, the link, the query and the scores. The YouTube description credits every stock clip and photo ("Video by … on Pixabay:
+  link") with a link to Pexels and Pixabay, as both ask, and its AI line says which visuals are AI-generated.
+- `--check` shows which scenes would search for stock, which stay AI and why, and what the last run chose.
+- **Cost:** about 10 neurons a scene for the queries and the scoring.
 
 ## Upscaling on Kaggle (`--upscale`)
 ```
@@ -395,12 +496,13 @@ the sharper images are used in the render (and the thumbnail). Images are enlarg
 ```
 The tests cover script parsing (including `[video]`/`[visual:]` tags and character lines), `--check`, `make_video.toml` defaults, the character sheet
 (names swapped for roles, only the scene's own characters), caption timing and alignment, AI image providers, models, sizes and their fallbacks,
-the Kaggle runner and `--upscale` (one batch, the cache, falling back to the originals), YouTube metadata (chapters, title and tag limits,
+the Kaggle runner, `--upscale` and `--engine chatterbox` (one batch, the caches, resuming, the fallbacks), stock media
+(search caching, rate limits, scoring, the per-format choice, credits), caption styles (key words, line cuts, faces), YouTube metadata (chapters, title and tag limits,
 the thumbnail), `research.py` (search parsing, missing captions, IP blocks) and the Remotion renderer's planning (timeline and crossfade
 maths, camera moves that never show an edge, per-format images, caption timing, place detection, when parallax is used). In `remotion/`,
 `npm run typecheck` checks the React code.
-All Cloudflare, Pollinations, Kaggle, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that
-`kaggle/upscale.ipynb` matches `kaggle/upscale.py`. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
+All Cloudflare, Pollinations, Pexels, Pixabay, Kaggle, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that
+`kaggle/upscale.ipynb` and `kaggle/chatterbox.ipynb` match their `.py` sources. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
 
 ## Credits
 The bundled font, `assets/fonts/NotoSans-Bold.ttf`, is licensed under the SIL Open Font License (`assets/fonts/OFL.txt`).

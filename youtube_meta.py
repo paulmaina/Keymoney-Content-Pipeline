@@ -373,9 +373,15 @@ def ai_line(scenes):
     footage = [d.resolve() for d in mv.FOOTAGE_DIRS]
 
     def is_ai(s):
+        if s.get("stock"):  # real footage or photos from Pexels / Pixabay
+            return False
         src = s.get("upscaled_from") or s.get("src")  # an upscaled picture is judged by the original
         return bool(s.get("ai")) or bool(src and not s["visual"] and Path(src).resolve().parent not in footage)
-    if any(map(is_ai, scenes)):  # one AI image is enough to disclose it
+    ai = sum(map(is_ai, scenes))
+    if ai and any(s.get("stock") for s in scenes):
+        return ("Some visuals in this video are AI-generated and the rest are stock footage and photos; "
+                "the narration is an AI voice.")
+    if ai:  # one AI image is enough to disclose it
         return "The visuals in this video are AI-generated, and the narration is an AI voice."
     return "The narration is an AI voice; this video has no AI-generated visuals."
 
@@ -384,7 +390,8 @@ def description(meta, chaps, scenes, channel):
     parts = [meta["hook"], meta["summary"]]
     if chaps:
         parts.append("Chapters:\n" + "\n".join(f"{timestamp(s)} {t}" for s, t in chaps))
-    parts += [ai_line(scenes), f"Subscribe to {channel} for more.", " ".join(meta["hashtags"])]
+    import stock
+    parts += [ai_line(scenes), stock.credits(scenes), f"Subscribe to {channel} for more.", " ".join(meta["hashtags"])]
     return "\n\n".join(p for p in parts if p)
 
 

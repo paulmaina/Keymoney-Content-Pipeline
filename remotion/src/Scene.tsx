@@ -1,5 +1,5 @@
 import React from 'react';
-import {AbsoluteFill, Easing, Img, interpolate, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Easing, Img, interpolate, OffthreadVideo, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
 import {BRAND, FONT, outline} from './theme';
 import type {Move, Scene as SceneProps} from './types';
 
@@ -61,6 +61,13 @@ const Picture: React.FC<{scene: SceneProps}> = ({scene}) => {
   );
 };
 
+// stock footage moves by itself; Python has already cropped it to the frame and cut it to the scene's length
+const Clip: React.FC<{scene: SceneProps}> = ({scene}) => (
+  <AbsoluteFill>
+    <OffthreadVideo src={staticFile(scene.src!)} muted style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+  </AbsoluteFill>
+);
+
 const Card: React.FC<{scene: SceneProps}> = ({scene}) => {
   const frame = useCurrentFrame();
   const {width, height} = useVideoConfig();
@@ -94,4 +101,4 @@ const Card: React.FC<{scene: SceneProps}> = ({scene}) => {
 };
 
 export const Scene: React.FC<{scene: SceneProps}> = ({scene}) =>
-  scene.kind === 'card' ? <Card scene={scene} /> : <Picture scene={scene} />;
+  scene.kind === 'video' ? <Clip scene={scene} /> : scene.kind === 'card' ? <Card scene={scene} /> : <Picture scene={scene} />;

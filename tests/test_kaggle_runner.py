@@ -99,7 +99,7 @@ def test_missing_token_explains_how_to_make_one(monkeypatch, tmp_path):
     monkeypatch.setattr(kr.ai_visuals, "ENV_FILE", tmp_path / "none.env")
     with pytest.raises(SystemExit) as e:
         kr.api_token()
-    assert "--upscale needs KAGGLE_API_TOKEN" in str(e.value) and "Generate New Token" in str(e.value)
+    assert "needs KAGGLE_API_TOKEN" in str(e.value) and "Generate New Token" in str(e.value)
 
 
 def test_token_goes_in_env_only_and_is_scrubbed(monkeypatch):
@@ -225,12 +225,13 @@ def test_log_lines_reads_json_and_plain_logs():
     assert kr.log_lines("one\n\ntwo") == ["one", "two"]
 
 
-def test_notebook_is_built_from_its_source():
+@pytest.mark.parametrize("name", ["upscale", "chatterbox"])
+def test_notebook_is_built_from_its_source(name):
     import importlib.util
     spec = importlib.util.spec_from_file_location("build_notebook", NOTEBOOK.parent / "build_notebook.py")
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
-    cells = build.cells_from_py((NOTEBOOK.parent / "upscale.py").read_text(encoding="utf-8"))
-    nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
-    assert [c["source"] for c in nb["cells"]] == [c["source"] for c in cells]  # rebuild after editing upscale.py
+    cells = build.cells_from_py((NOTEBOOK.parent / f"{name}.py").read_text(encoding="utf-8"))
+    nb = json.loads((NOTEBOOK.parent / f"{name}.ipynb").read_text(encoding="utf-8"))
+    assert [c["source"] for c in nb["cells"]] == [c["source"] for c in cells]  # rebuild after editing the .py
     assert nb["metadata"]["kaggle"]["isGpuEnabled"]

@@ -368,3 +368,12 @@ def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, 
     assert est["checks"] == 1 + 2  # scene 1's unchecked vertical image, and scene 2's two new ones
     assert est["neurons_checks"] == pytest.approx(3 * sc.check_neurons(av.VISION_MODEL))
     assert 25 < sc.check_neurons(av.VISION_MODEL) < 60
+
+
+def test_project_defaults_make_the_script_name_the_whole_command(monkeypatch):
+    monkeypatch.setattr(mv, "CONFIG_FILE", mv.ROOT / "make_video.toml")
+    a = mv.parse_args(["s.txt"])
+    assert (a.generate_visuals, a.check_images, a.upscale) == (True, True, True)
+    a = mv.parse_args(["s.txt", "--no-upscale", "--no-check-images", "--no-generate-visuals"])
+    assert (a.generate_visuals, a.check_images, a.upscale) == (False, False, False)
+    assert mv.parse_args(["s.txt", "--no-generate-visuals", "--redo-scenes", "3"]).generate_visuals  # redo still draws

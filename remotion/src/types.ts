@@ -9,8 +9,8 @@ export type Move = {
 
 export type Scene = {
   frames: number; // sequence length, including the transition overlap on each side
-  kind: 'image' | 'card';
-  src?: string; // image file in the public dir
+  kind: 'image' | 'video' | 'card';
+  src?: string; // image, or a stock clip already cut to the scene's length
   width?: number; // image size, so the mask lines up with the cover-cropped picture
   height?: number;
   mask?: string; // foreground mask for the 2.5D parallax
@@ -18,8 +18,9 @@ export type Scene = {
   move: Move;
 };
 
-export type CaptionWord = {text: string; start: number; end: number};
-export type CaptionLine = {start: number; end: number; words: CaptionWord[]};
+export type CaptionWord = {text: string; start: number; end: number; key: boolean}; // key: number, place, name or hack name
+export type CaptionLine = {start: number; end: number; y: number; words: CaptionWord[]}; // y: centre, share of the height
+export type CaptionStyle = 'bold' | 'clean' | 'minimal';
 
 export type Place = {
   frame: number; // when the label appears
@@ -29,6 +30,9 @@ export type Place = {
   lon: number | null;
   showMap: boolean; // first time this country appears
   visited: string[]; // countries pinned before this one
+  top?: number; // vertical: moved down below a face (share of the height); else under the top bar
+  mapWidth?: number; // vertical: the map's width when moved (share of the width), shrunk to fit above the captions
+  until?: number; // last frame of a moved map or label (for the captions)
 };
 
 export type Props = {
@@ -44,5 +48,6 @@ export type Props = {
   tagline: string;
   scenes: Scene[];
   captions: CaptionLine[];
+  captionStyle: CaptionStyle;
   places: Place[];
 };

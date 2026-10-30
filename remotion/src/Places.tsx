@@ -35,9 +35,13 @@ const Label: React.FC<{place: Place; length: number; underMap: boolean}> = ({pla
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const vertical = height > width;
-  const top = !vertical ? 76 : underMap ? height * MAP_TOP + width * MAP_WIDTH * MAP_ASPECT + 34 : height * 0.13;
+  const mapTop = height * (place.top ?? MAP_TOP);
+  const mapBottom = mapTop + width * (place.mapWidth ?? MAP_WIDTH) * MAP_ASPECT;
+  // a map moved down below a face holds its label along its bottom edge, leaving the room under it to the captions
+  const inMap = vertical && underMap && place.top !== undefined;
+  const size = !vertical ? 44 : inMap ? 42 : 54;
+  const top = !vertical ? 76 : inMap ? mapBottom - size * 1.25 - 18 : underMap ? mapBottom + 34 : mapTop;
   const t = frame - place.frame;
-  const size = vertical ? 54 : 44;
   const bar = interpolate(t, [0, 0.45 * fps], [0, 1], {...clamp, easing: Easing.out(Easing.cubic)});
   const text = interpolate(t, [0.15 * fps, 0.6 * fps], [1, 0], {...clamp, easing: Easing.out(Easing.cubic)});
   return (
@@ -93,7 +97,7 @@ const WorldMap: React.FC<{place: Place; length: number}> = ({place, length}) => 
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const vertical = height > width;
-  const w = vertical ? width * MAP_WIDTH : 560;
+  const w = vertical ? width * (place.mapWidth ?? MAP_WIDTH) : 560;
   const h = w * MAP_ASPECT;
   const t = frame - place.frame;
   const {projection, paths} = useMemo(() => {
@@ -126,7 +130,7 @@ const WorldMap: React.FC<{place: Place; length: number}> = ({place, length}) => 
       style={{
         position: 'absolute',
         right: vertical ? (width - w) / 2 : 70,
-        top: vertical ? height * MAP_TOP : 70,
+        top: vertical ? height * (place.top ?? MAP_TOP) : 70,
         width: w,
         height: h,
         borderRadius: 22,

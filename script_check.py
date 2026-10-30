@@ -10,7 +10,8 @@ import re
 import ai_visuals
 import make_video as mv
 
-WPM = {"edge": 135, "kokoro": 160}  # measured on the demo: edge ~134 wpm, kokoro ~160 wpm at +0%
+WPM = {"edge": 135, "kokoro": 160, "chatterbox": 150}  # measured on the demo: edge ~134 wpm, kokoro ~160 wpm at +0%;
+# chatterbox is a first guess until a full narration is measured
 # the 2-3 sentence format: long paragraphs hold one image too long. Short fragments ("No fridge.") are fine,
 # so more than 3 sentences only counts once the paragraph is also long-ish.
 MAX_SENTENCES, MAX_WORDS, SENTENCE_WORDS = 3, 60, 40
@@ -42,6 +43,12 @@ def text_neurons(model, chars_in, tokens_out):
 def check_neurons(model):
     """One --check-images call: the checker's instructions, the image and a short JSON reply."""
     return text_neurons(model, len(ai_visuals.QC_SYSTEM) + 300 + ai_visuals.QC_IMAGE_TOKENS * 4, CHECK_OUT_TOKENS)
+
+
+def estimated_seconds(scenes, args):
+    """Each scene's narration length, from its words, the voice engine and --rate (before any audio exists)."""
+    per_word = 60 / (WPM.get(args.engine, WPM["edge"]) * speed(args.rate))
+    return [len(s["text"].split()) * per_word + mv.PAUSE for s in scenes]
 
 
 def seconds_label(s):
@@ -144,7 +151,25 @@ def analyse(script, args):
     return {"script": script, "rows": rows, "flags": flags, "notes": notes, "sheet": sheet, "comments": comments,
             "declared": mv.parse_characters(script), "estimates": est, "upscale_minutes": upscale_min,
             "total_seconds": sum(r["seconds"] for r in rows), "words": sum(r["words"] for r in rows),
-            "prompts_path": prompts_path}
+            "prompts_path": prompts_path, "stock": stock_plan(scenes, args, base)}
+
+
+def stock_plan(scenes, args, base):
+    """Which scenes would search Pexels / Pixabay (no network: from the keys, --media, '# media:' lines and
+    characters), and what the last run chose (from <name>_media.json)."""
+    import json
+    import stock
+    keys = stock.keys(args.stock)
+    declared = mv.parse_characters(args.script.resolve()) if getattr(args, "script", None) else {}
+    plan = {i: stock.scene_mode(s, args.media, declared) for i, s in enumerate(scenes)}
+    try:
+        last = {r["scene"]: r for r in json.loads(base.with_name(base.name + "_media.json").read_text(encoding="utf-8"))["scenes"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        last = {}
+    return {"providers": list(keys), "search": [i + 1 for i, (m, _) in plan.items() if m in stock.THRESHOLD] if keys else [],
+            "ai": {i + 1: why for i, (m, why) in plan.items() if m == "ai"},
+            "last": {n: f"{r['stock'][next(iter(r['stock']))]['provider']} {r['stock'][next(iter(r['stock']))]['kind']}"
+                     for n, r in last.items() if r.get("choice") == "stock"}}
 
 
 def upscale_cached(image):
@@ -174,6 +199,18 @@ def report(script, args):
     own = [r["scene"] for r in rows if r["kind"] == "own file"]
     print(f"\nStrong move ([video]): {', '.join(map(str, strong)) or 'none'}")
     print(f"Image (Cloudflare): {', '.join(map(str, images)) or 'none'}")
+    st = a["stock"]
+    if args.media == "ai":
+        print("Stock media:        off (--media ai)")
+    elif not st["providers"]:
+        print("Stock media:        no PEXELS_API_KEY or PIXABAY_API_KEY in .env, so AI images only")
+    else:
+        print(f"Stock search ({' + '.join(st['providers'])}, --media {args.media}): {', '.join(map(str, st['search'])) or 'none'}"
+              " (each gets an AI image if nothing matches well)")
+        for n, why in st["ai"].items():
+            print(f"  scene {n}: AI image, {why}")
+        if st["last"]:
+            print("  last run used stock for: " + ", ".join(f"{n} ({w})" for n, w in st["last"].items()))
     if own:
         print(f"Own file:          {', '.join(map(str, own))}")
     described = [r for r in rows if r["description"]]

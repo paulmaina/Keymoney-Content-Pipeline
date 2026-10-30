@@ -30,6 +30,12 @@ TRANSITION = 16  # frames of crossfade between scenes (even, so it centres on th
 INTRO, OUTRO = 60, 105  # frames
 TAGLINE = "Clever ideas from the world's villages"
 LABEL_DELAY = 0.3  # seconds after a scene starts before its place label
+# Places.tsx's vertical layout (shares of the frame, or px): the map card under the Shorts top bar, the label under it
+MAP_TOP, MAP_WIDTH, MAP_ASPECT, LABEL_GAP_PX, LABEL_PX = 0.13, 0.8, 0.52, 34, 68
+MAP_SECONDS, LABEL_SECONDS = 4.2, 3.6
+MAP_MIN_WIDTH = 0.4  # a map moved below a face shrinks to fit above the captions, but not below this
+MAP_FLOOR = 0.63  # where a moved map or label must end: above the lowest caption slot, even two bold lines
+MAP_FACE_MIN, MAP_FACE_MARGIN = 0.05, 0.03  # smaller background faces may be covered
 CAPTION_HOLD = 0.5  # seconds a caption line stays after its last word when there's a gap
 
 # camera moves: (scale, x %, y %) at the start and the end. Offsets are clamped so the picture always covers the frame.
@@ -163,26 +169,93 @@ def caption_lines(chunks, fps, lead):
     return lines
 
 
-def place_props(scenes, script, bounds, fps):
+def map_spot(fmt, faces, show_map):
+    """(top, map width) as shares of the frame for one place's map and label in the vertical video, or None to keep
+    them under the top bar. When that would cover a face they move down below it: the map shrinks to fit above the
+    captions and its label goes inside it. If there's no room for a useful map they stay put."""
+    if fmt != "vertical" or not faces:
+        return None
+    w, h = mv.FORMATS[fmt]["size"]
+    top_rest = (LABEL_GAP_PX / h if show_map else 0) + LABEL_PX / h  # under the top bar the label sits below the map
+    rest = 0 if show_map else LABEL_PX / h  # moved, it sits inside the map
+
+    def end(top, width, below=rest):
+        return top + (width * w * MAP_ASPECT / h if show_map else 0) + below
+
+    def overlap(top, width, below=rest):
+        return sum(max(0.0, min(end(top, width, below), b1) - max(top, b0)) for b0, b1 in faces)
+    if not overlap(MAP_TOP, MAP_WIDTH, top_rest):
+        return None
+    top = max(b1 for b0, b1 in faces if b0 < end(MAP_TOP, MAP_WIDTH, top_rest) and b1 > MAP_TOP)
+    width = min(MAP_WIDTH, (MAP_FLOOR - top) * h / (w * MAP_ASPECT)) if show_map else MAP_WIDTH
+    if end(top, width) > MAP_FLOOR + 1e-9 or (show_map and width < MAP_MIN_WIDTH):
+        return None
+    if overlap(top, width):  # it would land on another face lower down
+        return None
+    return round(top, 4), round(width, 4)
+
+
+def place_props(scenes, script, bounds, fps, fmt=None):
+    """Place labels and map pins. In the vertical video, a map or label that would cover a face (in any scene it
+    spans) is moved down below it; those get "top" and "mapWidth", and "until" (its last frame) for the captions."""
+    import captions
     import places
+    found = list(places.scene_places(scenes, script))
+    faces = (captions.scene_faces(scenes, fmt, min_height=MAP_FACE_MIN, margin=MAP_FACE_MARGIN)
+             if fmt == "vertical" else None)
     out = []
-    for i, place, show_map, visited in places.scene_places(scenes, script):
-        out.append({"frame": bounds[i] + round(LABEL_DELAY * fps), "label": place.label, "country": place.country,
-                    "lat": place.lat, "lon": place.lon, "showMap": show_map, "visited": visited})
+    for n, (i, place, show_map, visited) in enumerate(found):
+        frame = bounds[i] + round(LABEL_DELAY * fps)
+        p = {"frame": frame, "label": place.label, "country": place.country, "lat": place.lat, "lon": place.lon,
+             "showMap": show_map, "visited": visited}
+        if faces:
+            nxt = bounds[found[n + 1][0]] + round(LABEL_DELAY * fps) if n + 1 < len(found) else float("inf")
+            until = min(frame + round((MAP_SECONDS if show_map else LABEL_SECONDS) * fps), nxt)
+            spanned = [b for j, b0 in enumerate(bounds) if b0 < until and (j + 1 == len(bounds) or bounds[j + 1] > frame)
+                       for b in faces[j]]
+            spot = map_spot(fmt, spanned, show_map)
+            if spot:
+                p.update(top=spot[0], mapWidth=spot[1], until=until)
+        out.append(p)
+    return out
+
+
+def map_blocks(places_, fmt):
+    """(start, end, y0, y1) of every map or label moved down, for the captions to stay clear of."""
+    w, h = mv.FORMATS[fmt]["size"]
+    out = []
+    for p in places_:
+        if "top" in p:
+            height = p["mapWidth"] * w * MAP_ASPECT if p["showMap"] else LABEL_PX  # a moved map holds its label
+            out.append((p["frame"], p["until"], p["top"], p["top"] + height / h))
     return out
 
 
 # ---------- assets ----------
 
-def prepare_assets(scenes, public, args, fmt, state):
+def stock_clip(src, out, fmt, frames, fps=mv.FPS):
+    """A stock video cover-cropped to the format and looped or cut to the scene's sequence length, silent."""
+    w, h = mv.FORMATS[fmt]["size"]
+    mv.run(["ffmpeg", "-y", "-stream_loop", "-1", "-i", src, "-t", f"{frames / fps:.3f}", "-vf",
+            f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},setsar=1,fps={fps}",
+            "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", out])
+    return out
+
+
+def prepare_assets(scenes, public, args, fmt, state, lengths=None):
     """Copy each scene's picture for one format (and its parallax mask) into the public dir. Returns per-scene asset
-    dicts. Files both formats share are copied once; `state` carries that and the parallax switch between formats."""
+    dicts. Files both formats share are copied once; `state` carries that and the parallax switch between formats.
+    Stock videos play as video, prepared to each scene's length (`lengths`, in frames)."""
     from PIL import Image
     public.mkdir(parents=True, exist_ok=True)
     copied = state.setdefault("copied", {})
     assets = []
     for i, s in enumerate(scenes):
         src = mv.scene_src(s, fmt)
+        if src and s.get("stock") and Path(src).suffix.lower() in mv.VIDEO_EXT and lengths:
+            clip = stock_clip(src, public / f"scene_{i:03}_{fmt}.mp4", fmt, lengths[i])
+            assets.append({"kind": "video", "src": clip.name})
+            continue
         if src and Path(src).suffix.lower() in mv.VIDEO_EXT:  # own footage: a still frame keeps the motion consistent
             if src not in copied:
                 frame = public / f"scene_{i:03}.png"
@@ -257,13 +330,41 @@ def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, place
     props_scenes = []
     for s, a, name, length in zip(scenes, assets, moves, lengths):
         aspect = (a.get("width") or 1) / (a.get("height") or 1)
-        strong = bool(s.get("video"))
+        strong = bool(s.get("video")) and a["kind"] == "image"
         props_scenes.append({**a, "frames": length, "text": s["text"] if a["kind"] == "card" else None,
                              "move": move_props(name, strong, aspect, w, h)})
     return {"width": w, "height": h, "fps": fps, "durationInFrames": total, "transitionFrames": TRANSITION,
             "introFrames": 0 if args.no_branding else INTRO, "outroFrames": 0 if args.no_branding else OUTRO,
             "font": "font.ttf", "channel": args.channel, "tagline": TAGLINE, "scenes": props_scenes,
-            "captions": lines, "places": places_}
+            "captions": lines, "captionStyle": caption_style(fmt, args), "places": places_}
+
+
+def caption_style(fmt, args):
+    import captions
+    return captions.style_for(fmt, getattr(args, "caption_style", "auto"))
+
+
+def caption_layouts(chunks, scenes, script, formats, args, fps, lead, bounds, blocks=None):
+    """{format: caption lines} in each format's style, kept off the faces in that format's pictures and off any map
+    moved down below a face (`blocks`: {format: map_blocks})."""
+    import captions
+    import places
+    if not chunks:
+        return {f: [] for f in formats}
+    names = list(mv.parse_characters(script))
+    places_by_scene = {}
+    for i, place, _, _ in places.scene_places(scenes, script):
+        places_by_scene.setdefault(i, []).append(place.label)
+    out = {}
+    for fmt in formats:
+        style = caption_style(fmt, args)
+        boxes = dict(enumerate(captions.scene_faces(scenes, fmt)))
+        out[fmt] = captions.layout(chunks, scenes, fmt, style, fps, lead, bounds, names, places_by_scene, boxes,
+                                   hold=CAPTION_HOLD, blocks=(blocks or {}).get(fmt, ()))
+        moved = sum(l["y"] != captions.POSITIONS[fmt][style][0] for l in out[fmt])
+        print(f"  {fmt} captions: {style}, {len(out[fmt])} lines, {sum(w['key'] for l in out[fmt] for w in l['words'])} "
+              f"key words, {moved} line(s) moved off a face")
+    return out
 
 
 def render_all(scenes, work, narration, chunks, font_path, args, formats, base, script):
@@ -280,13 +381,16 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, base, 
     print("Preparing Remotion assets...")
     state, assets, moves = {}, {}, {}
     for fmt in formats:
-        assets[fmt] = prepare_assets(scenes, public, args, fmt, state)
+        assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
         moves[fmt] = plan_moves(scenes, script.stem, {i for i, a in enumerate(assets[fmt]) if a.get("mask")})
-    lines = caption_lines(chunks, fps, lead) if chunks else []
-    places_ = place_props(scenes, script, bounds, fps)
+    places_ = {f: place_props(scenes, script, bounds, fps, f) for f in formats}
+    lines = caption_layouts(chunks, scenes, script, formats, args, fps, lead, bounds,
+                            {f: map_blocks(places_[f], f) for f in formats})
     parallax = " / ".join(f"{sum(bool(a.get('mask')) for a in assets[f])} {f}" for f in formats)
-    print(f"  {len(scenes)} scenes, parallax on {parallax}, {len(places_)} place label(s), "
-          f"{sum(p['showMap'] for p in places_)} map pin(s)")
+    some = places_[formats[0]]
+    moved = sum("top" in p for f in formats for p in places_[f])
+    print(f"  {len(scenes)} scenes, parallax on {parallax}, {len(some)} place label(s), "
+          f"{sum(p['showMap'] for p in some)} map pin(s), {moved} moved below a face")
     secs, measured = estimate(total, formats)
     print(f"Remotion render: {total} frames per format; estimated ~{minutes(secs)} for {' + '.join(formats)} "
           f"({'measured on this PC' if measured else 'first-run guess; the next estimate uses your real speed'}, "
@@ -300,8 +404,8 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, base, 
     outs = []
     for fmt in formats:
         props = rwork / f"props_{fmt}.json"
-        props.write_text(json.dumps(build_props(fmt, scenes, assets[fmt], moves[fmt], lengths, bounds, total, lines,
-                                                places_, args),
+        props.write_text(json.dumps(build_props(fmt, scenes, assets[fmt], moves[fmt], lengths, bounds, total, lines[fmt],
+                                                places_[fmt], args),
                                     ensure_ascii=False), encoding="utf-8")
         silent = rwork / f"{fmt}_silent.mp4"
         w, h = mv.FORMATS[fmt]["size"]

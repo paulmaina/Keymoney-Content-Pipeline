@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import captions
 import depth
 import make_video as mv
 import places
@@ -266,3 +267,57 @@ def test_masks_are_cached_and_flat_verdicts_remembered(tmp_path, monkeypatch):
     Image.new("RGB", (64, 64)).save(flat)
     monkeypatch.setattr(depth, "estimate", lambda image: (calls.append(1), np.full((100, 100), 0.5))[1])
     assert depth.foreground_mask(flat) is None and depth.foreground_mask(flat) is None and len(calls) == 2
+
+
+# ---------- the vertical map keeps off faces ----------
+
+VENDOR = [(0.2855, 0.4855)]  # Script2 scene 3's vendor in the vertical frame (YuNet box plus the map's margin)
+
+
+def test_map_stays_at_the_top_when_no_face_is_under_it():
+    assert rr.map_spot("vertical", [], True) is None
+    assert rr.map_spot("vertical", [(0.55, 0.65)], True) is None  # a face below the map's block
+    assert rr.map_spot("horizontal", VENDOR, True) is None
+
+
+def test_map_moves_below_a_face_and_shrinks_to_fit_above_the_captions():
+    top, width = rr.map_spot("vertical", VENDOR, True)
+    assert top == VENDOR[0][1] and rr.MAP_MIN_WIDTH <= width < rr.MAP_WIDTH
+    w, h = mv.FORMATS["vertical"]["size"]
+    end = top + width * w * rr.MAP_ASPECT / h  # its label goes inside it
+    assert end == pytest.approx(rr.MAP_FLOOR, abs=1e-3)
+    # a label on its own is short: it misses the vendor, and moves just under a face that's higher up
+    assert rr.map_spot("vertical", VENDOR, False) is None
+    assert rr.map_spot("vertical", [(0.1, 0.3)], False) == (0.3, rr.MAP_WIDTH)
+
+
+def test_map_stays_put_when_there_is_no_room_under_the_face():
+    assert rr.map_spot("vertical", [(0.15, 0.6)], True) is None
+    assert rr.map_spot("vertical", [(0.2, 0.3), (0.52, 0.6)], True) is None  # moving would cover the lower face
+    assert rr.map_spot("vertical", [(0.2, 0.3), (0.32, 0.5)], True)[0] == 0.5  # both under the top spot: below both
+
+
+def test_place_props_move_the_vertical_map_and_captions_avoid_it(monkeypatch):
+    scenes = [{"text": "No fridge here."}, {"text": "In northern Nigeria, heat spoils food."}]
+    seen = {}
+
+    def scene_faces(scenes, fmt, **kw):
+        seen.update(kw)
+        return [[], VENDOR]
+    monkeypatch.setattr(captions, "scene_faces", scene_faces)
+    bounds = [0, 150]
+    v = rr.place_props(scenes, None, bounds, FPS, "vertical")
+    h = rr.place_props(scenes, None, bounds, FPS, "horizontal")
+    assert seen == {"min_height": rr.MAP_FACE_MIN, "margin": rr.MAP_FACE_MARGIN}
+    assert v[0]["top"] == VENDOR[0][1] and v[0]["until"] == v[0]["frame"] + round(rr.MAP_SECONDS * FPS)
+    assert "top" not in h[0] and rr.map_blocks(h, "horizontal") == []
+    (start, end, y0, y1), = rr.map_blocks(v, "vertical")
+    assert (start, y0) == (v[0]["frame"], v[0]["top"]) and y1 == pytest.approx(rr.MAP_FLOOR, abs=1e-3)
+
+    from test_captions import words
+    chunks = [words("In northern Nigeria, heat spoils food.", 5.0), words("Then later on.", 15.0)]
+    lines = captions.layout(chunks, scenes, "vertical", "bold", FPS, 0, bounds, blocks=rr.map_blocks(v, "vertical"))
+    during = [l for l in lines if l["start"] < end]
+    after = [l for l in lines if l["start"] >= end]
+    assert during and all(l["y"] == 0.71 for l in during)  # the lowest slot, under the moved map
+    assert after and all(l["y"] == 0.64 for l in after)

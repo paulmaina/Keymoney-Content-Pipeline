@@ -787,7 +787,7 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     still fail are listed in the log and in s["quality_flags"].
     Scenes whose image can't be made keep src None (title card). Returns the 1-based numbers of
     failed scenes. With prompts_only, stop after writing the prompts file."""
-    targets = [(i, s) for i, s in enumerate(scenes) if not s["visual"]]
+    targets = [(i, s) for i, s in enumerate(scenes) if not s["visual"] and not s.get("stock")]
     if not targets:
         return []
     providers = providers or Providers(provider, model, text_model, creds)

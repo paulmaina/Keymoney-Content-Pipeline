@@ -2,6 +2,16 @@
 # without the leading dashes (generate-visuals = true, image-model = "flux-2-klein-4b", upscale = true, ...).
 # Options you type on the command line always win; VIDEO_STYLE in .env overrides style below.
 [defaults]
-style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
-voice = "en-US-EmmaMultilingualNeural"
+generate-visuals = true  # AI images / stock for scenes without [visual:]  (one run without: --no-generate-visuals)
+check-images = true      # vision check for extra fingers, limbs, text; ~40 neurons an image  (--no-check-images)
+upscale = true           # sharpen images with Real-ESRGAN on Kaggle, cached  (--no-upscale)
+style ="photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
+engine = "chatterbox"  # Chatterbox on a free Kaggle GPU; "edge" for the voice below without Kaggle
+chatterbox-emotion = 0.5   # the "natural" sample: 0.25 flat ... 2.0 theatrical
+chatterbox-cfg = 0.5       # ~0.3 keeps the pace natural at high emotion
+# chatterbox-voice = "voices/my_voice.wav"   # optional reference clip: only a voice you have the right to use
+voice = "en-US-EmmaMultilingualNeural"  # the Edge voice: used with engine = "edge", and if Chatterbox fails
 rate = "+5%"
+media = "mixed"      # mixed = stock footage where it matches well, else AI images; "stock" or "ai"
+stock = "auto"       # auto = Pexels and Pixabay, whichever has a key in .env; or "pexels" / "pixabay"
+caption-style = "auto"  # auto = bold for vertical, clean for horizontal; or "bold" / "clean" / "minimal" for both

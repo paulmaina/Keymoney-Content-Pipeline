@@ -35,7 +35,7 @@ export const Main: React.FC<Props> = (props) => {
     <AbsoluteFill style={{backgroundColor: BRAND.night}}>
       <TransitionSeries>{items}</TransitionSeries>
       <Places places={props.places} />
-      <Captions lines={props.captions} />
+      <Captions lines={props.captions} style={props.captionStyle} />
     </AbsoluteFill>
   );
 };

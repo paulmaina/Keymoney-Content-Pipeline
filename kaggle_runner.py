@@ -1,4 +1,4 @@
-"""Run a notebook on a free Kaggle GPU without the Kaggle website (used by make_video.py --upscale).
+"""Run a notebook on a free Kaggle GPU without the Kaggle website (make_video.py --upscale and --engine chatterbox).
 
 Uses the official Kaggle CLI (`python -m kaggle`) with a new-style API token from KAGGLE_API_TOKEN
 in .env. The token is passed to the CLI through its environment only: it never appears on a command
@@ -42,7 +42,7 @@ def slugify(text):
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:50] or "job"
 
 
-def api_token(feature="--upscale"):
+def api_token(feature="--upscale / --engine chatterbox"):
     ai_visuals.load_env()
     token = os.environ.get("KAGGLE_API_TOKEN", "").strip()
     if not token:
@@ -88,8 +88,8 @@ class KaggleCLI:
         return LogFollower(proc, self.scrub)
 
 
-# the notebooks' milestone lines ("image 3/38: ...", "Loading", "Images:"), shown with the status
-PROGRESS = re.compile(r"image \d+/\d+|Loading|Images:|failed|remaining|done", re.I)
+# the notebooks' milestone lines ("image 3/38: ...", "line 4/19: ...", "Loading", "Images:"), shown with the status
+PROGRESS = re.compile(r"(?:image|line) \d+/\d+|Loading|Images:|Lines:|failed|remaining|done", re.I)
 
 
 class LogFollower:

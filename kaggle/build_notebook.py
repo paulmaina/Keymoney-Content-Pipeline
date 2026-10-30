@@ -1,4 +1,4 @@
-"""Rebuild upscale.ipynb from upscale.py, so the two never drift apart.
+"""Rebuild the notebooks (upscale.ipynb, chatterbox.ipynb) from their .py sources, so the two never drift apart.
 
 Cells are separated by "# %%" lines; "# %% [markdown]" cells are markdown with "# " stripped.
 Usage: .venv\\Scripts\\python kaggle\\build_notebook.py
@@ -37,5 +37,8 @@ def build(py=HERE / "upscale.py"):
     return out
 
 
+NOTEBOOKS = ("upscale.py", "chatterbox.py")
+
 if __name__ == "__main__":
-    print(f"wrote {build()}")
+    for name in NOTEBOOKS:
+        print(f"wrote {build(HERE / name)}")
