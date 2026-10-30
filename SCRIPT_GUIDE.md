@@ -241,8 +241,9 @@ estimate until a full narration is measured; `--check` uses the current figure.)
   scenes), so a chapter fits in one Short and never has to be cut in the middle. `--check` lists every part with its scenes,
   chapters and length.
 
-**Cloudflare cost.** Images are free up to 10,000 Cloudflare "neurons" a day. Each new scene costs about **390 neurons**
-for one shot. Scenes longer than 6 seconds also get a **second shot** of the same moment from another angle or distance
+**Cloudflare cost.** Cloudflare makes every final image. The first 10,000 "neurons" a day are free; after that the editor's
+paid plan bills **$0.011 per 1,000**, up to a daily cap of **60,000 neurons** (about $0.55 a day beyond the free amount,
+`max-daily-neurons` in `make_video.toml`). Each new scene costs about **390 neurons** for one shot. Scenes longer than 6 seconds also get a **second shot** of the same moment from another angle or distance
 (on by default), which roughly doubles that scene to about **770 neurons**:
 
 | Item | Neurons |
@@ -253,18 +254,23 @@ for one shot. Scenes longer than 6 seconds also get a **second shot** of the sam
 | Second shot (scenes over 6 s): its prompt, two images and two checks | ~380 |
 | YouTube notes: the full video, plus one per Short (upper estimate) | ~110 + ~95 each |
 
-With 2–3 sentences, nearly every scene runs over 6 seconds, so a first render takes about:
+With 2–3 sentences, nearly every scene runs over 6 seconds, so a first render costs about (the dollars are beyond the free
+10,000, on a day nothing else was spent):
 
-| Scenes | With second shots (default) | Days | With `--no-two-shots` | Days |
+| Scenes | With second shots (default) | Cost | With `--no-two-shots` | Cost |
 |---|---|---|---|---|
-| 25 | ~19,000 | 2 | ~10,000 | 1–2 |
-| 50 | ~39,000 | 4 | ~20,000 | 2 |
-| 60 | ~47,000 | 5 | ~24,000 | 3 |
-| 75 | ~58,000 | 6 | ~30,000 | 3 |
+| 25 | ~19,000 | ~$0.10 | ~10,000 | ~$0.00 |
+| 50 | ~39,000 | ~$0.32 | ~20,000 | ~$0.11 |
+| 60 | ~47,000 | ~$0.41 | ~24,000 | ~$0.15 |
+| 75 | ~58,000 | ~$0.53 | ~30,000 | ~$0.22 |
 
-- **Several days:** when a script needs more than one day's allowance, `--check` says how many days. Run the render command
-  with `--visuals-only` once a day. Each day's images are cached, so the next day carries on where it stopped. When `--check`
-  shows 0 new images, render.
+- **The daily cap:** all of these fit under 60,000 in one day. Past about 75 scenes with second shots, `--check` says the run
+  doesn't fit and which scenes would go past the cap. Run the render command with `--visuals-only` once a day (each day's
+  images are cached, so the next day carries on where it stopped) and render when `--check` shows 0 new images, or raise the
+  cap. Scenes made past the cap during a render are drawn by a stand-in service and listed at the end, with the command that
+  redraws them with Cloudflare.
+- **Drafts:** `--draft` renders the whole script quickly with stand-in pictures (only the prompts cost neurons, about 75 a
+  scene), to check the pacing and the shots before paying for the final images.
 - **Redraws:** each image that fails the quality check and is redrawn adds ~173 neurons.
 - **Stock:** scenes that end up using stock footage don't need AI images, so they cost almost nothing.
 - **Reruns:** cached scenes are free, so changing one scene's narration or Visuals line only costs that scene.
@@ -300,8 +306,8 @@ This exact text is in `Scripts/TEMPLATE.txt` and passes `--check` with no flags 
 - 55 scenes and about 1,220 words, so about 8:09 with the intro and outro
 - 7 `[video]` scenes and 7 chapters
 - a vertical series of 4 Shorts, cut only at chapter headings
-- about 42,700 neurons with second shots, which is 5 days of Cloudflare allowance, or 21,900 (3 days) with
-  `--no-two-shots`
+- about 42,700 neurons with second shots (about $0.36 beyond the free 10,000, one day under the cap), or 21,900 (about
+  $0.13) with `--no-two-shots`
 The facts were chosen from well-documented examples, but **fact-check them (section 5) before using this script
 for a real video**.
 
@@ -501,4 +507,4 @@ Which of these would work where you live? Tell us in the comments, and subscribe
 - [ ] Respectful, accurate depiction of every community.
 - [ ] Fact-check list done (section 5), with sources, and anything unconfirmed softened or cut.
 - [ ] `make_video.py Scripts\<name>.txt --check` shows **Flags: none** and no notes. Its Shorts list cuts only at chapter
-      headings, and its "days of Cloudflare" line, if any, is planned for.
+      headings, and its "daily cap" line says "fits" (or the extra days are planned for).

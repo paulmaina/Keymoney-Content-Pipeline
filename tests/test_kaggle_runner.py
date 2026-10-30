@@ -1,4 +1,4 @@
-"""Tests for running a notebook on Kaggle (used by --upscale). The Kaggle CLI is faked: no real API calls, no GPU."""
+"""Tests for running a notebook on Kaggle (used by upscaling and Chatterbox). The Kaggle CLI is faked: no real API calls, no GPU."""
 import json
 import subprocess
 from pathlib import Path

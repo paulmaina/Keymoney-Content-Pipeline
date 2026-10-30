@@ -60,7 +60,7 @@ NAIROBI = timezone(timedelta(hours=3), "EAT")  # the cap's day; East Africa Time
 CF_RETRY_WAIT = (2, 10)  # seconds before Cloudflare's one retry: after an error, after a rate limit
 IMAGE_PX = 1024  # square images
 # real 16:9 and 9:16 images for models that take a size: multiples of 16, upscaled to 1080p by the renderer
-# (or sharpened to 3072 px with --upscale)
+# (sharpened to 3072 px on Kaggle first)
 SIZES = {"horizontal": (1536, 864), "vertical": (864, 1536)}
 MAX_PROMPT = 2048  # FLUX.1 schnell prompt limit
 ATTEMPTS = 3

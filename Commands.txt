@@ -34,32 +34,68 @@ README.md has the full detail on every feature. Keep this file up to date whenev
                                   not kaggle.json). Kaggle may ask you to verify your phone for GPU + internet.
        PIXABAY_API_KEY=           pixabay.com/api/docs/ (sign in; the key is shown on the page)
        PEXELS_API_KEY=            pexels.com/api/ (optional; used automatically once it's there)
-       POLLINATIONS_API_KEY=      optional fallback for images and prompts when Cloudflare runs out,
-                                  enter.pollinations.ai (starts with sk_). Allow the key to use text models there too.
+       POLLINATIONS_API_KEY=      enter.pollinations.ai (starts with sk_). Needed for --draft, --preview-scenes,
+                                  --thumbnail-ideas, --style-test and the emergency backup. Allow the key to use text
+                                  models there too.
 
    What each is for:
-       Cloudflare  image prompts, AI images, the image quality check, stock scoring, YouTube titles/description
-       Kaggle      the Chatterbox voice and --upscale (free GPU)
+       Cloudflare    every final image and image prompt, the image quality check, stock scoring, YouTube
+                     titles/description. The account is on the Workers Paid plan: past the free 10,000 neurons a day
+                     it bills (section 5), up to your daily cap.
+       Kaggle        the Chatterbox voice and the image upscaling on every final render (free GPU)
        Pixabay /
-       Pexels      stock footage and photos (use either or both; with neither, every scene gets an AI image)
+       Pexels        stock footage and photos (use either or both; with neither, every scene gets an AI image)
+       Pollinations  only three jobs: drafts (--draft, --preview-scenes), the emergency backup in a final render,
+                     and brainstorming (--thumbnail-ideas, --style-test). Never the final images otherwise.
 
 5. Check that it works (no network, nothing is spent):
        .venv\Scripts\python -m pytest -q
-       .venv\Scripts\python make_video.py Scripts\Script2.txt --check
+       .venv\Scripts\python make_video.py Scripts\TEMPLATE.txt --check
 
-Your defaults are in make_video.toml. Currently:
-    generate-visuals = true    stock or AI images for every scene without [visual:]
-    check-images = true        vision check for extra fingers/limbs/faces and stray text; failures are redrawn
-    upscale = true             Real-ESRGAN sharpening on Kaggle
-    engine = "chatterbox"      Chatterbox "natural" voice (emotion 0.5, cfg 0.5); falls back to Emma
-    voice = Emma Multilingual, rate = +5%, media = "mixed", stock = "auto", caption-style = "auto",
-    style = photorealistic documentary photography
-Options typed on the command line always win over the file.
+Your defaults are in make_video.toml. Options typed on the command line always win over the file; VIDEO_STYLE in .env
+overrides style. Every default, and how to change it (a make_video.toml line, or an option for one run):
+
+    What                       Default                              make_video.toml          one run
+    -------------------------  -----------------------------------  -----------------------  ------------------------
+    Final or draft             FINAL render                         draft-images = true      --draft
+    AI images / stock          on                                   generate-visuals = false --no-generate-visuals
+    Stock or AI mix            mixed (stock where it fits well)     media = "stock" / "ai"   --media stock / ai
+    Stock providers            auto (every key in .env)             stock = "pexels"         --stock pixabay
+    Image quality check        on (off in drafts)                   check-images = false     --no-check-images
+    Upscaling (Kaggle)         every final render, never in drafts  (no switch)              (no switch)
+    Daily Cloudflare cap       60000 neurons a day, Nairobi time    max-daily-neurons = N    --max-daily-neurons N
+                               (0 = no cap)
+    Image model                flux-2-klein-4b                      image-model = "..."      --image-model ...
+    Prompt writer              llama-3.3-70b-instruct-fp8-fast      text-model = "..."       --text-model ...
+    Vision check model         llama-4-scout-17b-16e-instruct       vision-model = "..."     --vision-model ...
+    YouTube notes model        llama-3.3-70b-instruct-fp8-fast      metadata-model = "..."   --metadata-model ...
+    Style                      photorealistic documentary photo...  style = "..."            --style "..."
+    Second shots (over 6 s)    on                                   two-shots = false        --no-two-shots
+    Formats                    both (video + Shorts)                format = "horizontal"    --format vertical
+    Voice engine               chatterbox (Kaggle; Emma fallback)   engine = "edge"          --engine edge
+    Chatterbox emotion / cfg   0.5 / 0.5                            chatterbox-emotion = ..  --chatterbox-emotion ..
+    Chatterbox reference voice built-in voice                       chatterbox-voice = ".."  --chatterbox-voice ..
+    Edge voice                 en-US-EmmaMultilingualNeural         voice = "..."            --voice ...
+    Speaking rate              +5%                                  rate = "+10%"            --rate +10%
+    Renderer                   remotion                             renderer = "ffmpeg"      --renderer ffmpeg
+    Intro and outro            on                                   no-branding = true       --no-branding
+    Caption style              auto (bold vertical, clean horiz.)   caption-style = "bold"   --caption-style clean
+    Captions                   on, whisper "base", 6 words a line   no-captions = true,      --no-captions,
+                                                                    whisper-model, caption-words
+    Parallax                   strong                               depth = "subtle"         --depth off
+    Overlays                   on                                   overlays = false         --no-overlays
+    Camera                     bold                                 camera = "calm"          --camera calm
+    Ambience                   on, volume 0.5                       sound-effects = false,   --no-sound-effects,
+                                                                    sfx-volume = 0.3         --sfx-volume 0.3
+    Music                      none (volume 0.2 when used)          music = "..."            --music "..."
+    YouTube notes + thumbnail  on                                   no-metadata = true       --no-metadata
+    Channel name               Smart Village Boy                    channel = "..."          --channel "..."
 
 
 2. SCRIPT FORMAT
 ----------------
 Save a .txt file in Scripts\. Each paragraph (separated by a blank line) is one scene: 2-3 spoken sentences.
+Your scripts stay on this PC: Scripts\ is gitignored except TEMPLATE.txt, and so are Exports\ and Research\.
 No length cap: plan 8-10 minute videos or longer, about 6-8 scenes and 150 words a minute (50-75 scenes). The vertical
 video is split into Shorts automatically, at chapter headings, so open every # HACK section with a strong first line.
 The full standard is SCRIPT_GUIDE.md (give it to your scripting project); Scripts\TEMPLATE.txt is a worked example:
@@ -107,20 +143,34 @@ Short example:
    Read Research\MyVideo_factcheck.md and soften anything not confirmed.
 4. Check it (free, no network):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --check
-   Fix every flag. It shows the main video's length, each Short's scenes and length, and how many days of Cloudflare
-   allowance the images need (section 5). If it's more than one day, do step 6a first.
-5. Optional: review the image prompts first (costs only ~50 neurons a scene):
-       .venv\Scripts\python make_video.py Scripts\MyVideo.txt --prompts-only
-   Edit Exports\MyVideo\Working\prompts.json or the # Visuals lines, then carry on.
-6a. Several days of Cloudflare? Make the visuals first, once a day, until --check shows 0 new images:
+   Fix every flag. It shows the main video's length, each Short's scenes and length, the Cloudflare neurons, what they
+   cost beyond the free 10,000, and whether the run fits under your daily cap (section 5). If it doesn't fit, do 6a.
+5. Optional, before spending on the final images:
+   - Review the image prompts (~50 neurons a scene):
+         .venv\Scripts\python make_video.py Scripts\MyVideo.txt --prompts-only
+     Edit Exports\MyVideo\Working\prompts.json or the # Visuals lines, then carry on.
+   - Brainstorm a style or thumbnails with Pollinations (no Cloudflare neurons):
+         .venv\Scripts\python make_video.py Scripts\MyVideo.txt --style-test "watercolour | 3D animated film"
+         .venv\Scripts\python make_video.py Scripts\MyVideo.txt --thumbnail-ideas 4
+   - Watch a quick draft of the whole video with Pollinations pictures:
+         .venv\Scripts\python make_video.py Scripts\MyVideo.txt --draft --engine edge
+     It goes to Exports\MyVideo\Working\MyVideo_DRAFT.mp4 with a red DRAFT label, never to Upload\. Its prompts are
+     Cloudflare's and are kept, so the final render reuses them; its pictures never are.
+6a. Doesn't fit under the cap? Make the visuals first, once a day, until --check shows 0 new images (or raise
+    max-daily-neurons in make_video.toml):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --visuals-only
 6. Render:
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt
-   That's the whole command: stock or AI visuals, image checks, upscaling, the Chatterbox voice, captions, the full
-   horizontal video, the vertical Shorts series and the YouTube notes. An 8-minute video takes roughly an hour to render
-   (--check estimates it), plus Kaggle queueing.
+   That's the whole command, a FINAL render: Cloudflare images (stock where it fits better), the image check, Kaggle
+   upscaling, the Chatterbox voice, captions, the full horizontal video, the vertical Shorts series and the YouTube
+   notes. It ends with "FINAL render: ready to upload from Exports\MyVideo\Upload". An 8-minute video takes roughly an
+   hour to render (--check estimates it), plus Kaggle queueing.
+   If a scene's Cloudflare call still failed after a retry, or the daily cap was reached, those scenes used the
+   Pollinations backup: the end of the run (and Working\log.txt) lists them with the exact command that redraws them
+   with Cloudflare, like:
+       .venv\Scripts\python make_video.py Scripts\MyVideo.txt --redo-scenes "15,16"
 7. Review the outputs. Each video has its own folder, named after the script (the run prints its Upload path):
-   Exports\MyVideo\Upload\      only what you upload to YouTube
+   Exports\MyVideo\Upload\      only what you upload to YouTube (only a final render writes here)
        MyVideo.mp4               1920x1080, the full video
        MyVideo_Short_Part1.mp4, MyVideo_Short_Part2.mp4, ...
                                  1080x1920 Shorts, each under 2:50: "Part 1 of N" at the start, "Watch Part 2" at
@@ -133,13 +183,17 @@ Short example:
        prompts.json              the image prompts and character sheet (edit, then rerun)
        media.json                which scenes use stock, from where, and the creators to credit
        image_checks.json         the quality check's verdict for each image
-       log.txt                   everything each run printed
+       log.txt                   everything each run printed, including the backup scenes and warnings
+       MyVideo_DRAFT.mp4         --draft;  preview.mp4: --preview-scenes
+       thumbnail_ideas\          --thumbnail-ideas;  style_tests\: --style-test
        kaggle\, render\          Kaggle job files and temporary render files
    Images, upscaled images, stock media and voice lines stay in the shared generated\ caches, so nothing is redrawn.
+   Draft pictures have their own cache (generated\drafts\) that a final render never reads.
    Watch both videos. Look for extra fingers or limbs (the log lists images the check flagged), wrong people, a
    stock clip that doesn't fit, captions or labels over a face, and mispronounced words.
 8. Fix what's wrong and rerun (only the changed parts are redone):
        a bad image:          --redo-scenes "3,7"
+       backup scenes:        the --redo-scenes command the run printed (step 6)
        a bad stock pick:     add "# media: ai" to that scene
        a wrong shot:         edit its # Visuals line (or its prompt in Working\prompts.json)
        a mispronounced word: spell it the way it's said in the narration
@@ -159,15 +213,21 @@ Short example:
 All start with:  .venv\Scripts\python make_video.py Scripts\MyVideo.txt  ...
 
 Planning
-    --check                     Scene list, word counts, estimated length, flags, the Cloudflare neurons, Kaggle
-                                time and render time. Changes nothing, no network. Add any options you'll render with
-                                (e.g. --check --new-images) to see their cost.
+    --check                     Scene list, word counts, estimated length, flags, the Cloudflare neurons, their cost
+                                beyond the free 10,000, whether the run fits under the daily cap, Kaggle time and
+                                render time. Changes nothing, no network. Add any options you'll render with
+                                (e.g. --check --new-images, --check --draft) to see their cost.
     --prompts-only              Write Exports\MyVideo\Working\prompts.json, then stop.
     --visuals-only              Make and cache the prompts and images (checks, stock, upscaling), then stop before the
-                                voice and video. For scripts that need several days of Cloudflare: once a day, then render.
+                                voice and video. For a script that doesn't fit under the cap: once a day, then render.
 
 Rendering
-    (no options)                The full render with your make_video.toml defaults.
+    (no options)                The FINAL render with your make_video.toml defaults, into Upload\.
+    --draft                     A quick DRAFT: Pollinations pictures (their own cache), one format (horizontal, or
+                                --format vertical), no upscaling, image checks, Shorts or YouTube notes, to
+                                Working\MyVideo_DRAFT.mp4 with a DRAFT label. Add --engine edge to skip Kaggle too.
+                                draft-images = true in make_video.toml makes every run a draft (--no-draft for one final).
+    --preview-scenes "1,6,8"    A draft of only those scenes, to Working\preview.mp4. Quick way to compare settings.
     --format vertical           Only the vertical Shorts (or horizontal; default both). Halves the image cost.
     -o MyVideo_v2               A different folder and name (default: the script's name): Exports\MyVideo_v2\.
                                 NOTE: prompts are saved per folder, so a new -o writes new prompts (images are reused
@@ -176,13 +236,25 @@ Rendering
     --music "Raw Footage\song.mp3"   Background music, ducked under the voice.
 
 Images
-    --redo-scenes "3,7"         Redraw only those scenes (numbers as --check shows them); everything else stays cached.
+    --redo-scenes "3,7"         Redraw only those scenes with Cloudflare (numbers as --check shows them); everything
+                                else stays cached. Also rewrites any prompt Cloudflare didn't write.
     --new-images                Redraw every image with a new seed (keeps the prompts). Costs the full image budget again.
     --regenerate                Rewrite all prompts AND redraw all images (your prompt edits are lost).
     --no-check-images           Skip the vision check this run (saves ~40 neurons an image).
-    --no-upscale                Skip Kaggle upscaling this run (quick drafts).
+    --max-daily-neurons 80000   This run's daily cap (default 60000; 0 = no cap). Set it for good in make_video.toml.
     --no-generate-visuals       No stock or AI images: Raw Footage\ files in order, else text cards.
     --image-model flux-2-klein-4b   The default. Others cost far more; see README "Image models".
+    (Upscaling has no switch: every final render sends new images to Kaggle once; if Kaggle fails or its hours are
+    used up, the render uses the original images and prints a WARNING.)
+
+Brainstorming (Pollinations only, no Cloudflare neurons; each stops before any voice or video)
+    --thumbnail-ideas 4         4 thumbnail options in Working\thumbnail_ideas\ (idea_1.jpg ...): the opening scene drawn
+                                different ways, with the thumbnail words on top. The final render still makes its own
+                                Upload\thumbnail.jpg.
+    --style-test "watercolour | 3D animated film | photorealistic documentary photography"
+                                One scene drawn once in each style, into Working\style_tests\. Put the one you like in
+                                make_video.toml as style = "...".
+    --style-test-scene 5        Which scene --style-test draws (default: the first without a [visual:] file).
 
 Stock footage
     --media mixed               Default: stock where it matches well (score 7/10+), AI images elsewhere. Scenes naming a
@@ -193,7 +265,7 @@ Stock footage
 
 Voice
     (default)                   Chatterbox "natural" on Kaggle. Each line is cached; falls back to Emma if Kaggle fails.
-    --engine edge               Emma (Edge voice), no Kaggle. Good for quick drafts.
+    --engine edge               Emma (Edge voice), no Kaggle. Good for drafts.
     --engine kokoro --voice am_michael   Offline voice (after download_models.py).
     --rate +10%                 Faster (or -5% slower). Default +5%.
     --chatterbox-emotion 0.35   0.25 flat ... 2.0 theatrical (default 0.5). Above ~0.7 also use --chatterbox-cfg 0.3.
@@ -208,8 +280,6 @@ Captions and look
     --renderer ffmpeg           Fast plain render (no Remotion motion, map or intro).
 
 Stills that feel alive (all on by default; each has a line in make_video.toml)
-    --preview-scenes "1,6,8"    Render only those scenes, in one format (horizontal, or --format vertical), to
-                                Exports\MyVideo\Working\preview.mp4. Quick way to compare settings.
     --depth strong              2.5D parallax with a filled-in background (or subtle / off).
     --no-overlays               No animated dust, smoke, mist, rain, heat shimmer, firelight, leaves, ripples, light rays.
     --camera calm               Slow moves and crossfades (default bold: faster moves, whip-pan/zoom between chapters).
@@ -226,41 +296,44 @@ Other tools
     Fact-check (Claude Code skill): /fact-check Scripts\MyVideo.txt   -> Research\MyVideo_factcheck.md
     Tests:                          .venv\Scripts\python -m pytest -q
     Code changes go to main through a GitHub pull request: GitHub Actions runs the same tests (and the Remotion type
-    check) on every PR; merge once the checks are green.
+    check) on every PR; merge once the checks are green. The repository is public: your scripts, Exports\, Research\
+    and .env are gitignored and stay on this PC.
 
 
 5. LIMITS AND COSTS
 -------------------
-Cloudflare Workers AI: 10,000 free neurons a day.
-    Resets at 00:00 UTC = 03:00 Nairobi time (EAT, UTC+3). (Once, on 29 Oct 2026, it accepted calls again earlier
-    than that, around 22:12 Nairobi time, so it's worth a try before 03:00.)
+Cloudflare Workers AI (Workers Paid plan): 10,000 free neurons a day, then $0.011 per 1,000 neurons.
+    The free amount resets at 00:00 UTC = 03:00 Nairobi time (EAT, UTC+3).
+    Daily cap: max-daily-neurons = 60000 in make_video.toml (about $0.55 a day beyond the free 10,000), counted per day
+    in Nairobi time (midnight to midnight), from what this PC has spent (generated\cloudflare_usage.json; use of the same
+    account elsewhere isn't seen). When a run reaches it, Cloudflare makes no more images or prompts that day, a
+    WARNING says so, and the remaining scenes use the Pollinations backup (listed at the end with a --redo-scenes
+    command). 0 = no cap.
     Per new scene, both formats: about 390 neurons (prompt ~46, two images ~264, two checks ~81), plus about 380 for
     its second shot if it runs over 6 s (two-shots, on by default). So a 55-scene, 8-minute script is about 42,700
-    neurons (5 days) with second shots, or 21,900 (3 days) with --no-two-shots.
-    Redrawn images add ~132 + ~40 each. Cached reruns cost almost nothing. --check shows the total first.
+    neurons with second shots (about $0.36 beyond the free 10,000, one day under the cap), or 21,900 (about $0.13)
+    with --no-two-shots. A draft costs only its prompts (~4,200 neurons for the same script; Pollinations draws).
+    Redrawn images add ~132 + ~40 each. Cached reruns cost almost nothing. --check shows the total, the cost and the
+    cap first.
 
 Kaggle: about 30 free GPU hours a week (Kaggle's Settings page shows what's left and when it resets).
-    Upscaling 38 images: ~2 min. Chatterbox: ~35 s to load plus roughly the speech length (a 3-minute video is
-    likely 5-10 min). Each run has a hard time limit, so a stuck run can't use up the week.
+    Upscaling, on every final render: only new images go (each once); 38 images take ~2 min. Chatterbox: ~35 s to load
+    plus roughly the speech length (a 3-minute video is likely 5-10 min). Each run has a hard time limit, so a stuck run
+    can't use up the week.
 
 Pixabay: 100 searches a minute. Pexels: 200 an hour. Searches are cached for 24 hours and downloads are kept, so
 reruns don't search again.
 
-When the Cloudflare allowance runs out:
-    - image-provider = "auto" (the default in make_video.toml): the run carries on with Pollinations for both the images
-      and the prompts (its text model writes the same detailed prompts), if POLLINATIONS_API_KEY is set; else those
-      scenes become text cards. Other options: --image-provider cloudflare (title cards when it runs out) or
-      --image-provider pollinations (no Cloudflare images at all).
-    - --check says how many scenes will likely fall back ("about 5 scene(s) would fall back to Pollinations: 15-19"),
-      from the neurons this PC has spent today (generated\cloudflare_usage.json).
-    - Images made while Cloudflare is out aren't quality-checked (the check needs Cloudflare).
-    - Better: stop, wait until 03:00 Nairobi, and rerun the same command. Everything already made is cached, so it
-      continues where it stopped.
-    - Long scripts: --check says how many days the images need (an 8-10 minute video is about 2-3 days). Run
-      --visuals-only once a day until --check shows 0 new images, then render once.
-    - To fit a day: --format vertical (half the images), --no-check-images, or --media stock / mixed (stock costs no
-      image neurons), or redo only some scenes with --redo-scenes.
-When Kaggle hours run out: --engine edge (Emma) and --no-upscale render without Kaggle.
+When Cloudflare fails or the cap is reached in a final render:
+    - Each Cloudflare call gets one retry. If it still fails (or the cap is reached), Pollinations draws that scene's
+      picture (and writes its prompt if the prompt writer failed). Without POLLINATIONS_API_KEY those scenes become
+      text cards.
+    - Backup pictures aren't kept for the next final render: rerunning asks Cloudflare again. The run prints the exact
+      --redo-scenes command for just those scenes; use it once Cloudflare works again, or the next day.
+    - Prompts Pollinations wrote are marked "stand_in" in prompts.json and are rewritten by Cloudflare next time.
+    - Bad credentials (401/403) stop Cloudflare for the rest of the run with a WARNING (section 6).
+When Kaggle hours run out: the render carries on with the original images (WARNING: upscaling skipped ...), and
+    --engine edge (Emma) renders the voice without Kaggle.
 
 
 6. TROUBLESHOOTING
@@ -271,15 +344,36 @@ When Kaggle hours run out: --engine edge (Emma) and --no-upscale render without 
 "Visual(s) not found: ..." before any audio is made
     A [visual: ...] file isn't in "Raw Footage\" or next to the script. Fix the name or remove the line.
 
-Cloudflare 429 / "daily allowance used up" / scenes became text cards
-    Section 5. Rerun after 03:00 Nairobi; cached work is kept.
+"WARNING: the daily Cloudflare cap is reached"
+    This PC has spent max-daily-neurons today (Nairobi time). The rest of the run used the Pollinations backup. Either
+    run the printed --redo-scenes command after midnight Nairobi time, or raise max-daily-neurons in make_video.toml
+    (or --max-daily-neurons 80000 for one run) and run it now.
 
-Cloudflare 401 / 403
+"WARNING: N scene(s) aren't Cloudflare's work in this final render"
+    Cloudflare failed for those scenes even after a retry (or the cap was reached). Run the --redo-scenes command
+    printed under it (also in Working\log.txt).
+
+Cloudflare 429 "daily free allocation" / "4006"
+    The account is still on the free Workers plan, so Cloudflare stops at 10,000 neurons and those scenes go to the
+    backup. Move the account to the Workers Paid plan in the Cloudflare dashboard, then redo the scenes.
+
+Cloudflare 401 / 403 ("WARNING: Cloudflare rejected the credentials")
     CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN in .env is wrong or expired. Make a new Workers AI token.
 
-"needs KAGGLE_API_TOKEN" / "Kaggle rejected KAGGLE_API_TOKEN"
-    Generate a new token on Kaggle (Settings > API Tokens) and put it in .env. Until then the voice falls back to
-    Emma and upscaling is skipped; the video still renders.
+"Cloudflare image generation needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN"
+    A final render needs Cloudflare (section 1, step 4). For a draft without it: --draft (prompts then come from
+    Pollinations).
+
+"Draft images (--draft, --preview-scenes, ...) need POLLINATIONS_API_KEY"
+    Add the key to .env (section 1, step 4).
+
+"WARNING: upscaling skipped: ..." / "needs KAGGLE_API_TOKEN" / "Kaggle rejected KAGGLE_API_TOKEN"
+    The video still renders, with the original images. Generate a new token on Kaggle (Settings > API Tokens) and put
+    it in .env; if the weekly GPU hours are used up, wait for the weekly reset. The next render upscales them.
+
+"unrecognized arguments: --upscale" / "--image-provider"
+    Both are gone: upscaling is always on, and Cloudflare makes every final image (--draft for a Pollinations version).
+    An old make_video.toml with upscale or image-provider lines only gets a "unknown option ... ignored" note.
 
 Kaggle run waits "queued" for a long time
     Free GPUs can queue for several minutes. Ctrl+C stops WATCHING, not the run; rerun later and only the missing
@@ -321,8 +415,8 @@ The video looks too busy, or a scene's overlay or sound is wrong
     --preview-scenes. Overlays and sounds come from the scene's # Visuals line: reword it (for example, remove "misty").
 
 "Pollinations text refused (this key isn't allowed to use Pollinations' text models ...)"
-    On enter.pollinations.ai, open your key and allow text models. Until then, prompts written while Cloudflare is out
-    are simple stand-ins (rewritten properly on the next run), and Pollinations still draws the images.
+    On enter.pollinations.ai, open your key and allow text models. Until then, prompts Pollinations would have written
+    are simple stand-ins (rewritten properly by Cloudflare on the next final render), and Pollinations still draws.
 
 An error mentioning cv2 / OpenCV
     .venv\Scripts\python -m pip install -r requirements.txt   (OpenCV must stay below version 5).
