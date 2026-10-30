@@ -13,4 +13,6 @@ def no_user_defaults(monkeypatch, tmp_path):
     import make_video
     monkeypatch.setattr(make_video, "CONFIG_FILE", tmp_path / "no-config.toml")
     monkeypatch.setattr(ai_visuals, "ENV_FILE", tmp_path / "no.env")
+    # nor count fake Cloudflare usage against today's real allowance
+    monkeypatch.setattr(ai_visuals, "usage_path", lambda: tmp_path / "cloudflare_usage.json")
     monkeypatch.delenv("VIDEO_STYLE", raising=False)

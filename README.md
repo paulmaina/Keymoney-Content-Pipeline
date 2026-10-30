@@ -325,11 +325,24 @@ With this option, `Raw Footage/` is **not** used to fill the other scenes.
 | `pollinations` | FLUX.1 schnell on [Pollinations](https://pollinations.ai) | `POLLINATIONS_API_KEY` |
 
 Providers share the `generated/` cache. A cached image from any provider is reused, and the log shows which provider made each image
-(also recorded in `prompts.json`). Prompts are written by Cloudflare's text model whenever Cloudflare credentials are set, whatever the
-image provider. Without them, or after the daily allowance runs out, a simple prompt is built from the scene text.
+(also recorded in `prompts.json`). `make_video.toml` sets `image-provider = "auto"`.
+
+**Prompts when Cloudflare is out.** Prompts are written by Cloudflare's text model whenever it's available, whatever the image
+provider. Once its daily allowance runs out, the same detailed instructions go to **Pollinations' text model**
+(`gen.pollinations.ai/v1/chat/completions`, its default model, with the same key), so scenes made after that still get full
+prompts. That also covers the second-shot rewrites and the stock search queries and scores. The quality check needs Cloudflare's
+vision model, so those images are left unchecked. Only when neither text model can answer is a simple prompt built from the scene
+text; it's marked `"stand_in"` in `prompts.json` and written properly on the next run.
+
+**How many scenes will fall back.** Each run records the neurons it spent today (UTC) and whether Cloudflare refused, in
+`generated/cloudflare_usage.json`. `--check` walks the scenes in order against what's left and prints, for example, "about 5
+scene(s) would fall back to Pollinations: 15-19" (or to title cards without a key). Use of the same Cloudflare account from
+elsewhere isn't seen, so it's an upper bound on what's left.
 
 **Pollinations setup:** create a free secret key (it starts with `sk_`) at [enter.pollinations.ai](https://enter.pollinations.ai) and add
-`POLLINATIONS_API_KEY=...` to `.env`. Its FLUX model costs 0.002 "pollen" per image from the free allowance. The current API requires a key. Its
+`POLLINATIONS_API_KEY=...` to `.env`. For the prompt fallback, the key must also be **allowed to use text models**: on
+enter.pollinations.ai, open the key and allow text (a key without it answers with a refusal, which the run detects and reports,
+then keeps using Pollinations for images only). Its FLUX model costs 0.002 "pollen" per image from the free allowance. The current API requires a key. Its
 docs no longer mention the old `nologo` option or a watermark, so check the first few images it makes.
 
 ### Image models

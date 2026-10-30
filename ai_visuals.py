@@ -29,6 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
@@ -43,6 +44,11 @@ POLLINATIONS_API = "https://gen.pollinations.ai/image/{prompt}"
 TEXT_MODEL = METADATA_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 POLLINATIONS_MODEL = "flux"  # alias for black-forest-labs/flux.1-schnell
 POLLINATIONS_CACHE_ID = "pollinations:flux"
+# when Cloudflare's text model is out of allowance, prompts are written by Pollinations' text model (same key)
+POLLINATIONS_TEXT_API = "https://gen.pollinations.ai/v1/chat/completions"
+POLLINATIONS_TEXT_MODEL = None  # None = the service's default, a small low-cost model
+NOT_ALLOWED = re.compile(r"isn.?t allowed to use|allow it for this key|pollinations\.ai/grant", re.I)
+USAGE_FILE_NAME = "cloudflare_usage.json"  # in GEN_DIR: neurons this PC spent per UTC day, and whether Cloudflare refused
 PROVIDERS = ("auto", "cloudflare", "pollinations")
 IMAGE_PX = 1024  # square images
 # real 16:9 and 9:16 images for models that take a size: multiples of 16, upscaled to 1080p by the renderer
@@ -307,6 +313,71 @@ def pollinations_run(prompt, key, seed, timeout=180, size="square"):
         raise ProviderError(f"network error ({getattr(e, 'reason', e)})", retryable=True) from None
 
 
+def pollinations_text_run(messages, key, max_tokens=220, temperature=0.7, timeout=90):
+    """POST a chat completion to Pollinations and return the reply text. The key is sent as a header only."""
+    body = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+    if POLLINATIONS_TEXT_MODEL:
+        body["model"] = POLLINATIONS_TEXT_MODEL
+    req = urllib.request.Request(POLLINATIONS_TEXT_API, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                                          "User-Agent": "ai-video-editor"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise ProviderError(f"HTTP {e.code}", quota=e.code == 402, auth=e.code in (401, 403),
+                            retryable=e.code == 429 or e.code >= 500, status=e.code) from None
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        raise ProviderError(f"network error ({getattr(e, 'reason', e)})", retryable=True) from None
+    except ValueError:
+        raise ProviderError("unreadable text response") from None
+    try:
+        reply = str(data["choices"][0]["message"]["content"] or "")
+    except (KeyError, IndexError, TypeError):
+        raise ProviderError("unexpected text response (no choices)") from None
+    if NOT_ALLOWED.search(reply):  # a refusal arrives as an ordinary reply (HTTP 200): never use it as a prompt
+        raise ProviderError("this key isn't allowed to use Pollinations' text models (allow text for the key at "
+                            "enter.pollinations.ai)", auth=True)
+    return reply
+
+
+def utc_day():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def usage_path():
+    return GEN_DIR / USAGE_FILE_NAME
+
+
+def usage_today():
+    """{"day", "neurons", "refused"} for today (UTC, when the allowance resets), as this PC has counted it."""
+    try:
+        data = json.loads(usage_path().read_text(encoding="utf-8"))
+        if data.get("day") == utc_day():
+            return {"day": data["day"], "neurons": float(data.get("neurons", 0)), "refused": bool(data.get("refused"))}
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return {"day": utc_day(), "neurons": 0.0, "refused": False}
+
+
+def record_usage(neurons=0.0, refused=False):
+    u = usage_today()
+    u["neurons"] += neurons
+    u["refused"] = u["refused"] or refused
+    try:
+        usage_path().parent.mkdir(parents=True, exist_ok=True)
+        usage_path().write_text(json.dumps(u), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def neurons_left():
+    """Cloudflare neurons likely left today: 0 once it has refused today, else the allowance minus this PC's count
+    (other use of the same account isn't seen, so this is an upper bound)."""
+    u = usage_today()
+    return 0.0 if u["refused"] else max(0.0, FREE_NEURONS_PER_DAY - u["neurons"])
+
+
 def check_image(data):
     try:
         from PIL import Image
@@ -437,6 +508,8 @@ class Providers:
         if mode == "auto" and not self.poll_key:
             print("  (no POLLINATIONS_API_KEY: if Cloudflare's daily allowance runs out, remaining scenes get title cards)")
         self.cf_ok = bool(self.creds)  # the text model always uses Cloudflare when it's available
+        self.poll_text = bool(self.poll_key)  # ... and Pollinations' text model once Cloudflare is out
+        self._logged = 0.0  # neurons already written to the usage record
         self.vision_model = vision_model
         self.neurons = self.qc_neurons = 0.0
         self.counts = Counter()
@@ -451,11 +524,42 @@ class Providers:
         why = "rejected the credentials" if e.auth else "daily allowance or rate limit reached"
         nxt = "Pollinations" if self.mode == "auto" and self.poll_key else "title cards / template prompts"
         print(f"  Cloudflare {why} ({e}); not calling it again this run, using {nxt}.")
+        if self.poll_text:
+            print("  Image prompts are written by Pollinations' text model from now on (same detail, no neurons).")
+        # the daily allowance (not a brief rate limit): nothing more from Cloudflare until 00:00 UTC
+        self.save_usage(refused=e.quota or "daily free allocation" in str(e).lower())
+
+    @property
+    def text_ok(self):
+        """Some text model can write prompts: Cloudflare's, or Pollinations' as the fallback."""
+        return self.cf_ok or self.poll_text
+
+    def save_usage(self, refused=False):
+        record_usage(self.neurons - self._logged, refused)
+        self._logged = self.neurons
+
+    def _pollinations_text(self, messages, max_tokens, temperature):
+        try:
+            reply = with_retries(pollinations_text_run, messages, self.poll_key, max_tokens, temperature)
+        except ProviderError as e:
+            if e.quota or e.auth:
+                self.poll_text = False
+                print(f"  Pollinations text {'credit used up' if e.quota else 'refused'} ({e}); "
+                      "simple prompts from here on (Pollinations images still work).")
+            else:
+                print(f"    Pollinations prompt writer failed ({e}); using a simple prompt")
+            return None
+        self.counts["pollinations_text"] += 1
+        return reply.strip().strip('"').strip() or None
 
     def text(self, messages, max_tokens=160, model=None, temperature=0.7):
-        """Run the prompt-writing model (or `model`, e.g. the vision checker). Returns None if it's unavailable or fails."""
+        """Run the prompt-writing model (or `model`, e.g. the vision checker). When Cloudflare is out of allowance, text
+        jobs go to Pollinations' text model instead (the vision check needs Cloudflare). Returns None if no model can
+        answer."""
+        vision = model is not None and model == self.vision_model
+        fallback = not vision and self.poll_text
         if not self.cf_ok:
-            return None
+            return self._pollinations_text(messages, max_tokens, temperature) if fallback else None
         model = model or self.text_model
         try:
             result = cf_call(model, {"messages": messages, "max_tokens": max_tokens,
@@ -463,8 +567,10 @@ class Providers:
         except ProviderError as e:
             if e.stops_provider:
                 self._disable_cloudflare(e)
-            print(f"    {'quality check' if model == self.vision_model else 'prompt writer'} failed ({e}); "
-                  f"{'image kept unchecked' if model == self.vision_model else 'using a simple prompt'}")
+                if fallback:
+                    return self._pollinations_text(messages, max_tokens, temperature)
+            print(f"    {'quality check' if vision else 'prompt writer'} failed ({e}); "
+                  f"{'image kept unchecked' if vision else 'using a simple prompt'}")
             return None
         usage = result.get("usage") or {}
         response = result.get("response")
@@ -557,10 +663,13 @@ class Providers:
         raise ProviderError("; ".join(errors) or "no image provider available")
 
     def report(self):
+        self.save_usage()
         if self.neurons:
             qc = f", of which ~{self.qc_neurons:.0f} for {self.counts['qc']} quality check(s)" if self.counts["qc"] else ""
             print(f"  Cloudflare usage this run: ~{self.neurons:.0f} neurons{qc} "
                   f"(free allowance {FREE_NEURONS_PER_DAY:,}/day; estimate from the published rates)")
+        if self.counts["pollinations_text"]:
+            print(f"  Pollinations text model: {self.counts['pollinations_text']} prompt(s) written while Cloudflare was out")
 
 
 def fallback_prompt(text, description=""):
@@ -865,7 +974,7 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
                 rec["stand_in"] = True  # the writer was unavailable: written properly next time
         rec["prompt"] = prompt
         if second_shots and i in second_shots and "prompt2" not in rec and not prompts_only:
-            rec.update(prompt2=write_second_prompt(prompt, s, providers) if providers.cf_ok else fallback_second(prompt),
+            rec.update(prompt2=write_second_prompt(prompt, s, providers) if providers.text_ok else fallback_second(prompt),
                        prompt2_for=prompt)
         records.append(rec)
         previous = prompt
