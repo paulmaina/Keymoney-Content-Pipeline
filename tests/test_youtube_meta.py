@@ -348,7 +348,7 @@ class FakeProviders:
     """Stands in for ai_visuals.Providers: records the call, never touches the network."""
     calls = []
 
-    def __init__(self, mode, image_model, text_model, creds=None, poll_key=None):
+    def __init__(self, mode, image_model, text_model, creds=None, poll_key=None, cap=None):
         self.text_model, self.cf_ok, self.neurons = text_model, True, 0.0
         self.model = ai_visuals.model_info(ai_visuals.resolve_model(image_model))
 

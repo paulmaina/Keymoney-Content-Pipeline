@@ -7,7 +7,8 @@
       youtube.md                  titles, descriptions, chapters and tags, with a section per Short
   Exports/<name>/Working/   everything else
       prompts.json, media.json, image_checks.json, <name>.srt and each Short's .srt, log.txt,
-      kaggle/ (job files of the Kaggle runs), render/ (temporary files, removed unless --keep-work)
+      kaggle/ (job files of the Kaggle runs), render/ (temporary files, removed unless --keep-work),
+      <name>_DRAFT.mp4 (--draft), preview.mp4 (--preview-scenes), thumbnail_ideas/ and style_tests/ (brainstorming)
 
 <name> is the script's file name, or -o: a plain name ("Promo") goes under Exports/, a path ("D:\\Videos\\Promo") is used
 as the folder. The shared caches (generated/ images, upscaled images, stock media and voice lines) stay where they are,
@@ -102,6 +103,17 @@ class PreviewOutputs(Outputs):
     @property
     def sound_effects(self):  # the full video's record stays as it was
         return self.working / "preview_sound_effects.json"
+
+
+class DraftOutputs(Outputs):
+    """--draft: the one draft video goes to Working/<name>_DRAFT.mp4, never to Upload/."""
+
+    def video(self, fmt):
+        return self.working / f"{self.name}_DRAFT.mp4"
+
+    @property
+    def sound_effects(self):  # the final video's record stays as it was
+        return self.working / "draft_sound_effects.json"
 
 
 class Tee:

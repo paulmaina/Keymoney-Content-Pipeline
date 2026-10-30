@@ -1,20 +1,24 @@
 """AI-generated scene images (used by make_video.py --generate-visuals).
 
 For each scene without a [visual: ...] line, a Workers AI text model turns the narration
-into an image prompt, then an image provider draws it:
+into an image prompt, then an image provider draws it (Providers):
 
-  cloudflare    a Workers AI image model (--image-model, default FLUX.2 [klein] 4B; free daily allowance)
-  pollinations  FLUX.1 schnell on Pollinations (needs a free key in POLLINATIONS_API_KEY)
-  auto          Cloudflare, switching to Pollinations for the rest of the run once Cloudflare's
-                daily allowance runs out; scenes that still fail get a title card
+  final render  Cloudflare writes every prompt and draws every image (--image-model, default FLUX.2 [klein] 4B),
+                and keeps billing past the free 10,000 neurons a day (Workers Paid) up to max-daily-neurons, counted
+                per day in Nairobi time. Pollinations is only the emergency backup: for a scene whose Cloudflare call
+                still fails after one retry, or once the daily cap is reached. Those scenes are listed at the end of
+                the run with the --redo-scenes command that redraws them with Cloudflare.
+  draft         (--draft, --preview-scenes, --thumbnail-ideas, --style-test) Pollinations draws the images into
+                generated/drafts/, a cache a final render never reads. Prompts still come from Cloudflare while it's
+                within the cap, so the final render reuses them.
 
 Models that take a width and height (all but FLUX.1 schnell) draw a real 16:9 image for the horizontal
 video and a real 9:16 one for the vertical video, so nothing important is cropped away. FLUX.1 schnell
 only makes squares, which the renderers crop to each format.
 
-Prompts are saved to Exports/<name>/Working/prompts.json for review and editing (rewritten when the style changes).
-Images are cached in generated/ (keyed by prompt + size + provider model) and any provider's cached image
-is reused, so reruns don't spend quota.
+Prompts are saved to Exports/<name>/Working/prompts.json for review and editing (rewritten when the style changes); a
+prompt Cloudflare didn't write is marked "stand_in" and written again by Cloudflare on the next final render.
+Final images are cached in generated/ (keyed by prompt + size + model), so reruns don't spend neurons.
 """
 import base64
 import hashlib
@@ -29,7 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
@@ -48,8 +52,12 @@ POLLINATIONS_CACHE_ID = "pollinations:flux"
 POLLINATIONS_TEXT_API = "https://gen.pollinations.ai/v1/chat/completions"
 POLLINATIONS_TEXT_MODEL = None  # None = the service's default, a small low-cost model
 NOT_ALLOWED = re.compile(r"isn.?t allowed to use|allow it for this key|pollinations\.ai/grant", re.I)
-USAGE_FILE_NAME = "cloudflare_usage.json"  # in GEN_DIR: neurons this PC spent per UTC day, and whether Cloudflare refused
-PROVIDERS = ("auto", "cloudflare", "pollinations")
+USAGE_FILE_NAME = "cloudflare_usage.json"  # in GEN_DIR: neurons this PC spent today (UTC day and Nairobi day)
+MODES = ("final", "draft")
+MAX_DAILY_NEURONS = 60_000  # max-daily-neurons default: about $0.55 a day beyond the free 10,000
+NEURON_PRICE = 0.011 / 1000  # US$ per neuron beyond the free allowance (Workers Paid plan, Oct 2026)
+NAIROBI = timezone(timedelta(hours=3), "EAT")  # the cap's day; East Africa Time has no daylight saving
+CF_RETRY_WAIT = (2, 10)  # seconds before Cloudflare's one retry: after an error, after a rate limit
 IMAGE_PX = 1024  # square images
 # real 16:9 and 9:16 images for models that take a size: multiples of 16, upscaled to 1080p by the renderer
 # (or sharpened to 3072 px with --upscale)
@@ -188,11 +196,6 @@ class ProviderError(Exception):
         self.quota = quota
         self.status = status
 
-    @property
-    def stops_provider(self):
-        """Quota used up, bad credentials or still rate-limited after retries: stop calling it this run."""
-        return self.quota or self.auth or self.status == 429
-
 
 CloudflareError = ProviderError  # earlier name, kept for callers and tests
 
@@ -264,7 +267,8 @@ def cf_run(model, payload, creds, timeout=120):
             body = json.loads(raw)
     except urllib.error.HTTPError as e:
         detail = _error_detail(e)
-        # the free plan answers 429 with a message about the daily neuron allocation once it's used up
+        # the free plan answers 429 with a message about the daily neuron allocation once it's used up (Workers Paid
+        # bills instead, so on the paid plan this is a real error and the scene goes to the backup)
         quota = e.code == 429 and any(k in detail.lower() for k in ("neuron", "daily", "allocation", "4006"))
         raise ProviderError(f"HTTP {e.code}{': ' + detail if detail else ''}", quota=quota,
                             retryable=(e.code == 429 or e.code >= 500) and not quota,
@@ -288,10 +292,6 @@ def with_retries(call, *args):
             wait = 2 ** attempt
             print(f"    {e}; retrying in {wait}s...")
             time.sleep(wait)
-
-
-def cf_call(model, payload, creds):
-    return with_retries(cf_run, model, payload, creds)
 
 
 def pollinations_run(prompt, key, seed, timeout=180, size="square"):
@@ -342,7 +342,13 @@ def pollinations_text_run(messages, key, max_tokens=220, temperature=0.7, timeou
 
 
 def utc_day():
+    """The free allowance's day: it resets at 00:00 UTC (03:00 in Nairobi)."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def nairobi_day():
+    """The daily cap's day (max-daily-neurons): it resets at midnight in Nairobi."""
+    return datetime.now(NAIROBI).strftime("%Y-%m-%d")
 
 
 def usage_path():
@@ -350,20 +356,24 @@ def usage_path():
 
 
 def usage_today():
-    """{"day", "neurons", "refused"} for today (UTC, when the allowance resets), as this PC has counted it."""
+    """Neurons this PC has spent today: "free_used" in the UTC day the free allowance counts, "spent" in the Nairobi
+    day the cap counts. Other use of the same account isn't seen."""
+    u = {"free_day": utc_day(), "free_used": 0.0, "cap_day": nairobi_day(), "spent": 0.0}
     try:
         data = json.loads(usage_path().read_text(encoding="utf-8"))
-        if data.get("day") == utc_day():
-            return {"day": data["day"], "neurons": float(data.get("neurons", 0)), "refused": bool(data.get("refused"))}
+        if data.get("free_day") == u["free_day"]:
+            u["free_used"] = float(data.get("free_used", 0))
+        if data.get("cap_day") == u["cap_day"]:
+            u["spent"] = float(data.get("spent", 0))
     except (OSError, ValueError, TypeError, AttributeError):
         pass
-    return {"day": utc_day(), "neurons": 0.0, "refused": False}
+    return u
 
 
-def record_usage(neurons=0.0, refused=False):
+def record_usage(neurons=0.0):
     u = usage_today()
-    u["neurons"] += neurons
-    u["refused"] = u["refused"] or refused
+    u["free_used"] += neurons
+    u["spent"] += neurons
     try:
         usage_path().parent.mkdir(parents=True, exist_ok=True)
         usage_path().write_text(json.dumps(u), encoding="utf-8")
@@ -371,11 +381,19 @@ def record_usage(neurons=0.0, refused=False):
         pass
 
 
-def neurons_left():
-    """Cloudflare neurons likely left today: 0 once it has refused today, else the allowance minus this PC's count
-    (other use of the same account isn't seen, so this is an upper bound)."""
-    u = usage_today()
-    return 0.0 if u["refused"] else max(0.0, FREE_NEURONS_PER_DAY - u["neurons"])
+def free_left():
+    """Free neurons this PC hasn't used yet today (UTC day); beyond them, Workers Paid bills."""
+    return max(0.0, FREE_NEURONS_PER_DAY - usage_today()["free_used"])
+
+
+def spent_today():
+    """Neurons spent today in Nairobi time, which max-daily-neurons caps."""
+    return usage_today()["spent"]
+
+
+def dollars(neurons, free=None):
+    """US$ for `neurons` more today: whatever doesn't fit in the free neurons left (`free`, default today's)."""
+    return max(0.0, neurons - (free_left() if free is None else free)) * NEURON_PRICE
 
 
 def check_image(data):
@@ -403,10 +421,15 @@ def image_path(prompt, model, size="square"):
     return GEN_DIR / f"{key}.jpg"
 
 
+def draft_path(prompt, size="square"):
+    """A draft image's place: generated/drafts/, a cache of its own that a final render never reads."""
+    return GEN_DIR / "drafts" / image_path(prompt, "draft|" + POLLINATIONS_CACHE_ID, size).name
+
+
 def save_image(data, path):
     """Write an image into the cache. Files made from the image it replaces (its parallax mask, its quality
     verdict) are deleted, so a redrawn picture never keeps the old one's."""
-    GEN_DIR.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".part")
     tmp.write_bytes(data)
     for old in path.parent.glob(path.stem + ".*"):
@@ -487,56 +510,93 @@ def data_uri(image, side=QC_SIDE):
 
 
 class Providers:
-    """Image providers and the prompt-writing text model for one run, with fallback and usage counts."""
+    """The image providers and the prompt-writing text model for one run, with usage counts and the daily cap.
 
-    def __init__(self, mode="auto", image_model=IMAGE_MODEL, text_model=TEXT_MODEL, creds=None, poll_key=None,
-                 new_images=False, vision_model=VISION_MODEL):
-        if mode not in PROVIDERS:
-            raise ValueError(f"unknown image provider {mode}")
+    mode "final": Cloudflare writes the prompts and draws the images. A call that still fails after one retry, or the
+    daily cap (`cap`, max-daily-neurons; 0 = none), sends that work to the Pollinations backup, and the scene is
+    recorded in self.backup for the --redo-scenes line at the end of the run.
+    mode "draft": Pollinations draws every image into generated/drafts/; Cloudflare still writes the prompts while it
+    can, and Pollinations' text model writes them when it can't."""
+
+    def __init__(self, mode="final", image_model=IMAGE_MODEL, text_model=TEXT_MODEL, creds=None, poll_key=None,
+                 new_images=False, vision_model=VISION_MODEL, cap=MAX_DAILY_NEURONS):
+        if mode not in MODES:
+            raise ValueError(f"unknown provider mode {mode}")
         image_model = resolve_model(image_model)
         self.mode, self.image_model, self.text_model = mode, image_model, text_model
         self.model = model_info(image_model)
         # --new-images: skip the image cache and use a random seed, so the same prompt gives a different picture
         self.new_images = new_images
-        self.creds = creds or credentials(required=mode == "cloudflare")
+        self.creds = creds or credentials(required=mode == "final")
         self.poll_key = poll_key if poll_key is not None else pollinations_key()
-        if mode == "pollinations" and not self.poll_key:
-            raise SystemExit(f"--image-provider pollinations needs POLLINATIONS_API_KEY.\n{POLLINATIONS_SETUP}")
-        if mode == "auto" and not (self.creds or self.poll_key):
-            raise SystemExit("AI images need Cloudflare credentials or a Pollinations key.\n"
-                             f"Cloudflare:\n{CF_SETUP}\nPollinations: {POLLINATIONS_SETUP}")
-        if mode == "auto" and not self.poll_key:
-            print("  (no POLLINATIONS_API_KEY: if Cloudflare's daily allowance runs out, remaining scenes get title cards)")
-        self.cf_ok = bool(self.creds)  # the text model always uses Cloudflare when it's available
-        self.poll_text = bool(self.poll_key)  # ... and Pollinations' text model once Cloudflare is out
+        if mode == "draft" and not self.poll_key:
+            raise SystemExit("Draft images (--draft, --preview-scenes, --thumbnail-ideas, --style-test) come from "
+                             f"Pollinations and need POLLINATIONS_API_KEY.\n{POLLINATIONS_SETUP}")
+        if mode == "final" and poll_key is None and not self.poll_key:
+            print("  (no POLLINATIONS_API_KEY: a scene Cloudflare can't draw, or one past the daily cap, gets a title card)")
+        self.cf_ok = bool(self.creds)  # Cloudflare is called: credentials, not rejected, under the cap
+        self.poll_text = bool(self.poll_key)  # Pollinations' text model writes prompts Cloudflare can't
+        self.cap = cap or 0
+        self.capped = False
         self._logged = 0.0  # neurons already written to the usage record
         self.vision_model = vision_model
         self.neurons = self.qc_neurons = 0.0
         self.counts = Counter()
-
-    def _disable_cloudflare(self, e):
-        if not self.cf_ok:
-            return
-        self.cf_ok = False
-        if e.auth and self.mode == "cloudflare":
-            raise SystemExit(f"Cloudflare rejected the credentials ({e}).\n"
-                             "Check CLOUDFLARE_ACCOUNT_ID, and that the API token has Workers AI Read + Edit permission.")
-        why = "rejected the credentials" if e.auth else "daily allowance or rate limit reached"
-        nxt = "Pollinations" if self.mode == "auto" and self.poll_key else "title cards / template prompts"
-        print(f"  Cloudflare {why} ({e}); not calling it again this run, using {nxt}.")
-        if self.poll_text:
-            print("  Image prompts are written by Pollinations' text model from now on (same detail, no neurons).")
-        # the daily allowance (not a brief rate limit): nothing more from Cloudflare until 00:00 UTC
-        self.save_usage(refused=e.quota or "daily free allocation" in str(e).lower())
+        self.last_writer = None  # who answered the latest text(): "cloudflare", "pollinations" or None
+        self.backup = {}  # final render: scene number -> why it isn't all Cloudflare's work
 
     @property
     def text_ok(self):
-        """Some text model can write prompts: Cloudflare's, or Pollinations' as the fallback."""
+        """Some text model can write prompts: Cloudflare's, or Pollinations' as the backup."""
         return self.cf_ok or self.poll_text
 
-    def save_usage(self, refused=False):
-        record_usage(self.neurons - self._logged, refused)
+    def save_usage(self):
+        record_usage(self.neurons - self._logged)
         self._logged = self.neurons
+
+    def spent(self):
+        """Neurons spent today in Nairobi time, this run's included."""
+        return spent_today() + self.neurons - self._logged
+
+    def within_cap(self, cost=0.0):
+        """True if `cost` more neurons stay within max-daily-neurons. The first time they don't, Cloudflare is left
+        alone for the rest of the run, with a warning."""
+        if self.capped:
+            return False
+        if not self.cap or self.spent() + cost <= self.cap:
+            return True
+        self.capped, self.cf_ok = True, False
+        self.save_usage()
+        nxt = ("the Pollinations backup draws the remaining scenes (listed at the end of the run)"
+               if self.mode == "final" and self.poll_key else
+               "Pollinations writes the remaining draft prompts" if self.mode == "draft" else
+               "the remaining scenes get title cards (no POLLINATIONS_API_KEY)")
+        bar = "=" * 78
+        print(f"\n{bar}\nWARNING: the daily Cloudflare cap is reached: ~{self.spent():,.0f} neurons spent today "
+              f"(Nairobi time) of max-daily-neurons = {self.cap:,}.\nNo more Cloudflare images or prompts this run; "
+              f"{nxt}.\nThe cap resets at midnight Nairobi time; raise max-daily-neurons in make_video.toml to allow "
+              f"more.\n{bar}")
+        return False
+
+    def _cf(self, model, payload):
+        """A Cloudflare call with one retry. An error that survives the retry (or bad credentials) is raised."""
+        try:
+            return cf_run(model, payload, self.creds)
+        except ProviderError as e:
+            if e.auth:
+                raise
+            wait = CF_RETRY_WAIT[1] if e.status == 429 else CF_RETRY_WAIT[0]
+            print(f"    Cloudflare: {e}; retrying once in {wait}s...")
+            time.sleep(wait)
+        return cf_run(model, payload, self.creds)
+
+    def _cloudflare_failed(self, e, what):
+        if e.auth:  # every later call would fail the same way
+            self.cf_ok = False
+            print(f"  WARNING: Cloudflare rejected the credentials ({e}); not calling it again this run. Check "
+                  "CLOUDFLARE_ACCOUNT_ID, and that the API token has Workers AI Read + Edit permission.")
+        else:
+            print(f"    Cloudflare {what} failed after a retry ({e})")
 
     def _pollinations_text(self, messages, max_tokens, temperature):
         try:
@@ -553,25 +613,27 @@ class Providers:
         return reply.strip().strip('"').strip() or None
 
     def text(self, messages, max_tokens=160, model=None, temperature=0.7):
-        """Run the prompt-writing model (or `model`, e.g. the vision checker). When Cloudflare is out of allowance, text
-        jobs go to Pollinations' text model instead (the vision check needs Cloudflare). Returns None if no model can
-        answer."""
+        """Run the prompt-writing model (or `model`, e.g. the vision checker) on Cloudflare. When Cloudflare can't (an
+        error after its retry, the daily cap, no credentials), text jobs go to Pollinations' text model instead; the
+        vision check never does. Returns None if no model can answer; self.last_writer says which one did."""
         vision = model is not None and model == self.vision_model
-        fallback = not vision and self.poll_text
-        if not self.cf_ok:
-            return self._pollinations_text(messages, max_tokens, temperature) if fallback else None
         model = model or self.text_model
-        try:
-            result = cf_call(model, {"messages": messages, "max_tokens": max_tokens,
-                                     "temperature": temperature}, self.creds)
-        except ProviderError as e:
-            if e.stops_provider:
-                self._disable_cloudflare(e)
-                if fallback:
-                    return self._pollinations_text(messages, max_tokens, temperature)
-            print(f"    {'quality check' if vision else 'prompt writer'} failed ({e}); "
-                  f"{'image kept unchecked' if vision else 'using a simple prompt'}")
+        self.last_writer = None
+        if self.cf_ok and self.within_cap():
+            try:
+                result = self._cf(model, {"messages": messages, "max_tokens": max_tokens, "temperature": temperature})
+            except ProviderError as e:
+                self._cloudflare_failed(e, "quality check" if vision else "text model")
+            else:
+                return self._cloudflare_reply(result, messages, model)
+        if vision or not self.poll_text:
             return None
+        reply = self._pollinations_text(messages, max_tokens, temperature)
+        if reply:
+            self.last_writer = "pollinations"
+        return reply
+
+    def _cloudflare_reply(self, result, messages, model):
         usage = result.get("usage") or {}
         response = result.get("response")
         if isinstance(response, (dict, list)):  # some models' JSON replies arrive already parsed
@@ -588,11 +650,15 @@ class Providers:
         if model == self.vision_model:
             self.qc_neurons += cost
         self.counts["qc" if model == self.vision_model else "text"] += 1
-        return str(response or "").strip().strip('"').strip() or None
+        self.save_usage()
+        reply = str(response or "").strip().strip('"').strip() or None
+        if reply:
+            self.last_writer = "cloudflare"
+        return reply
 
     def inspect(self, image, shot=""):
         """Ask the vision model whether an image has broken anatomy or stray text. Returns a verdict, or None when it
-        can't be checked (no Cloudflare, quota used up, unreadable reply)."""
+        can't be checked (no Cloudflare, the cap reached, unreadable reply)."""
         content = [{"type": "text", "text": f"The picture was meant to show: {shot[:500]}\nCheck it." if shot
                     else "Check this picture."},
                    {"type": "image_url", "image_url": {"url": data_uri(image)}}]
@@ -601,18 +667,18 @@ class Providers:
         return parse_verdict(reply)
 
     def sizes(self, formats):
-        """The image shapes to draw: one per video format for a sized model, else one square for all."""
-        return [f for f in formats if f in SIZES] if self.model.sized and self.mode != "pollinations" else ["square"]
-
-    def cache_ids(self):
-        return [(self.image_model, "cloudflare"), (POLLINATIONS_CACHE_ID, "pollinations")]
+        """The image shapes to draw: one per video format for a sized model (and for drafts), else one square."""
+        sized = self.model.sized or self.mode == "draft"
+        return [f for f in formats if f in SIZES] if sized else ["square"]
 
     def cached(self, prompt, size="square"):
-        for model, name in self.cache_ids():
-            p = image_path(prompt, model, size)
-            if p.exists():
-                return p, name
-        return None
+        """The cached image for a prompt: Cloudflare's for a final render, the draft's for a draft. Neither stands in
+        for the other, and the backup's images are never reused, so the next final render asks Cloudflare again."""
+        if self.mode == "draft":
+            p, name = draft_path(prompt, size), "pollinations"
+        else:
+            p, name = image_path(prompt, self.image_model, size), "cloudflare"
+        return (p, name) if p.exists() else None
 
     def _cloudflare(self, prompt, size, fresh):
         payload = {"prompt": prompt}
@@ -622,12 +688,13 @@ class Providers:
             payload[self.model.steps_key] = self.model.steps
         if fresh and self.model.sized:  # FLUX.1 schnell rejects a seed and varies by itself
             payload["seed"] = random_seed()
-        result = cf_call(self.image_model, payload, self.creds)
+        result = self._cf(self.image_model, payload)
         try:
             data = base64.b64decode(result["image"])
         except (KeyError, TypeError, ValueError):
             raise ProviderError("unexpected image response (no image field)") from None
         self.neurons += self.model.neurons(*dims(size))
+        self.save_usage()
         return check_image(data)
 
     def _pollinations(self, prompt, size, fresh):
@@ -635,41 +702,53 @@ class Providers:
         return check_image(with_retries(pollinations_run, prompt, self.poll_key, seed, 180, size))
 
     def image(self, prompt, regenerate=False, size="square", fresh=False):
-        """Return (path, provider, from_cache). `fresh` (or --new-images) skips the cache and draws with a new random
-        seed, replacing the cached image. Raises ProviderError when no provider can make it."""
+        """Return (path, provider, from_cache). A final render asks Cloudflare (one retry), then the Pollinations backup;
+        a draft asks Pollinations. `fresh` (or --new-images) skips the cache and draws with a new random seed,
+        replacing the cached image. Raises ProviderError when no provider can make it."""
         fresh = fresh or self.new_images
         if not (regenerate or fresh) and (hit := self.cached(prompt, size)):
             return hit[0], hit[1], True
-        attempts = []
-        if self.mode in ("auto", "cloudflare") and self.cf_ok:
-            attempts.append(("cloudflare", self.image_model, self._cloudflare))
-        if self.mode in ("auto", "pollinations") and self.poll_key:
-            attempts.append(("pollinations", POLLINATIONS_CACHE_ID, self._pollinations))
         errors = []
-        for name, cache_id, make in attempts:
+        if self.mode == "final":
+            if self.cf_ok and self.within_cap(self.model.neurons(*dims(size))):
+                try:
+                    data = self._cloudflare(prompt, size, fresh)
+                except ProviderError as e:
+                    self._cloudflare_failed(e, "image")
+                    errors.append(f"cloudflare: {e}")
+                else:
+                    self.counts["cloudflare"] += 1
+                    return save_image(data, image_path(prompt, self.image_model, size)), "cloudflare", False
+            else:
+                errors.append("cloudflare: " + ("the daily cap is reached" if self.capped else "not available"))
+        if self.poll_key:
+            target = draft_path(prompt, size) if self.mode == "draft" else image_path(prompt, POLLINATIONS_CACHE_ID, size)
             try:
-                path = save_image(make(prompt, size, fresh), image_path(prompt, cache_id, size))
+                data = self._pollinations(prompt, size, fresh)
             except ProviderError as e:
-                errors.append(f"{name}: {e}")
-                if name == "cloudflare" and e.stops_provider:
-                    self._disable_cloudflare(e)
-                elif name == "pollinations" and (e.quota or e.auth):
+                errors.append(f"pollinations: {e}")
+                if e.quota or e.auth:
                     self.poll_key = None
                     print(f"  Pollinations {'credit used up' if e.quota else 'rejected the key'} ({e}); "
                           "not calling it again this run.")
-                continue
-            self.counts[name] += 1
-            return path, name, False
+            else:
+                self.counts["pollinations"] += 1
+                return save_image(data, target), "pollinations", False
         raise ProviderError("; ".join(errors) or "no image provider available")
 
     def report(self):
         self.save_usage()
         if self.neurons:
             qc = f", of which ~{self.qc_neurons:.0f} for {self.counts['qc']} quality check(s)" if self.counts["qc"] else ""
-            print(f"  Cloudflare usage this run: ~{self.neurons:.0f} neurons{qc} "
-                  f"(free allowance {FREE_NEURONS_PER_DAY:,}/day; estimate from the published rates)")
+            u = usage_today()
+            billed = max(0.0, u["free_used"] - FREE_NEURONS_PER_DAY)
+            cap = f"of the {self.cap:,} cap" if self.cap else "(no daily cap)"
+            print(f"  Cloudflare usage this run: ~{self.neurons:.0f} neurons{qc} (estimate from the published rates)")
+            print(f"  today: ~{u['spent']:,.0f} neurons {cap} (Nairobi day); ~{billed:,.0f} beyond the free "
+                  f"{FREE_NEURONS_PER_DAY:,} so far, about ${billed * NEURON_PRICE:.2f} (UTC day)")
         if self.counts["pollinations_text"]:
-            print(f"  Pollinations text model: {self.counts['pollinations_text']} prompt(s) written while Cloudflare was out")
+            print(f"  Pollinations text model: {self.counts['pollinations_text']} prompt(s) written while Cloudflare "
+                  "couldn't")
 
 
 def fallback_prompt(text, description=""):
@@ -922,7 +1001,7 @@ def draw(providers, prompt, size, shot, regenerate=False, fresh=False, check=Fal
 
 
 def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", regenerate=False, creds=None,
-                           prompts_only=False, provider="auto", text_model=TEXT_MODEL, providers=None,
+                           prompts_only=False, text_model=TEXT_MODEL, providers=None,
                            characters=None, formats=("horizontal", "vertical"), redo=(), check=False, only=None,
                            second_shots=None):
     """Fill s["src"] (and s["image_prompt"]) for every scene without a [visual: ...] line. A model that takes a
@@ -935,12 +1014,14 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     Scenes whose image can't be made keep src None (title card). Returns the 1-based numbers of
     failed scenes. With prompts_only, stop after writing the prompts file. `only` (0-based indices) limits the work to
     those scenes (--preview-scenes); the other scenes' saved prompts are kept in the file. Scenes in `second_shots`
-    (0-based) also get a second image of the same moment from another angle (s["srcs2"]), prompt saved as "prompt2"."""
+    (0-based) also get a second image of the same moment from another angle (s["srcs2"]), prompt saved as "prompt2".
+    In a final render, scenes the Pollinations backup helped with are recorded in providers.backup."""
     targets = [(i, s) for i, s in enumerate(scenes) if not s["visual"] and not s.get("stock")
                and (only is None or i in only)]
     if not targets:
         return []
-    providers = providers or Providers(provider, model, text_model, creds)
+    providers = providers or Providers("final", model, text_model, creds)
+    final = providers.mode == "final"
     fresh = regenerate or style_changed(prompts_path, style)
     if fresh and not regenerate:
         print(f"  the style changed since {prompts_path.name} was written: writing new prompts and character "
@@ -954,7 +1035,8 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     sheet = build_sheet(characters, {} if fresh else load_characters(prompts_path))
     sizes = providers.sizes(formats)
     shapes = " + ".join("x".join(map(str, dims(z))) for z in sizes)
-    print(f"Writing image prompts for {len(targets)} scene(s) (images: {provider}, "
+    print(f"Writing image prompts for {len(targets)} scene(s) (images: "
+          f"{'Cloudflare' if final else 'Pollinations, draft'}, "
           f"{providers.image_model.rsplit('/', 1)[-1]} at {shapes})"
           f"{' (ignoring cache and saved prompts)' if regenerate else ''}...")
 
@@ -970,12 +1052,17 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
         else:
             prompt, found = write_prompt(s["text"], previous, providers, style, sheet, description)
             learn(sheet, found, f"{s['text']} {description}")
-            if prompt == fallback_prompt(s["text"], description):
-                rec["stand_in"] = True  # the writer was unavailable: written properly next time
+            if providers.last_writer != "cloudflare" or prompt == fallback_prompt(s["text"], description):
+                rec["stand_in"] = True  # not Cloudflare's: the next final render writes it again
+                if final and not prompts_only:
+                    providers.backup.setdefault(i + 1, "prompt not written by Cloudflare")
         rec["prompt"] = prompt
         if second_shots and i in second_shots and "prompt2" not in rec and not prompts_only:
-            rec.update(prompt2=write_second_prompt(prompt, s, providers) if providers.text_ok else fallback_second(prompt),
-                       prompt2_for=prompt)
+            prompt2 = write_second_prompt(prompt, s, providers) if providers.text_ok else fallback_second(prompt)
+            ours = providers.text_ok and providers.last_writer == "cloudflare"
+            rec.update(prompt2=prompt2, prompt2_for=prompt if ours else None)  # None: written again next time
+            if final and not ours:
+                providers.backup.setdefault(i + 1, "second-shot prompt not written by Cloudflare")
         records.append(rec)
         previous = prompt
     shots = []  # after the loop, so later-learned characters reach earlier scenes too
@@ -1010,6 +1097,8 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
             rec["image_provider"] = name
             made["cached" if cached else name] += 1
             new |= not cached
+            if final and name == "pollinations":
+                providers.backup[i + 1] = "Pollinations backup image"
             if verdict:
                 rec.setdefault("quality", {})[size] = verdict
                 if not verdict["ok"]:
@@ -1041,6 +1130,8 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
                     print(f"  {label}: failed ({e}); the scene keeps one shot")
                     continue
                 made["cached" if cached else name] += 1
+                if final and name == "pollinations":
+                    providers.backup[i + 1] = "Pollinations backup image"
                 if verdict:
                     rec.setdefault("quality2", {})[size] = verdict
             if second:

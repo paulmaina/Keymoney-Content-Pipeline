@@ -2,6 +2,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 import make_video as mv
 import script_check
 import shorts
@@ -45,16 +47,18 @@ def test_template_s_shorts_cut_only_at_chapter_headings(tmp_path):
     assert all(shorts.part_seconds(seconds[x:y]) <= shorts.LIMIT for x, y in parts)
 
 
-def test_template_s_cloudflare_days_match_the_guide(tmp_path):
+def test_template_s_cloudflare_cost_matches_the_guide(tmp_path):
     one = check(tmp_path, "--check-images", "--no-two-shots")
     est = one["estimates"]
-    assert est["days"] == -(-int(est["neurons_total"]) // 10_000) and est["days"] == 3
+    assert est["days"] == 1 and est["cap"]["fits"]  # well under the 60,000 daily cap
+    assert est["cap"]["dollars"] == pytest.approx(0.13, abs=0.02)  # the guide's ~$0.13 beyond the free 10,000
     per_scene = (est["neurons_total"] - est["neurons_meta"]) / len(one["rows"])
     assert 360 <= per_scene <= 420  # the guide's ~390 neurons a scene with one shot
     two = check(tmp_path, "--check-images", "--two-shots")
     est2 = two["estimates"]
     per_scene2 = (est2["neurons_total"] - est2["neurons_meta"]) / len(two["rows"])
-    assert 720 <= per_scene2 <= 820 and est2["days"] == 5  # ~770 with second shots (every template scene is over 6 s)
+    assert 720 <= per_scene2 <= 820 and est2["days"] == 1  # ~770 with second shots (every template scene is over 6 s)
+    assert est2["cap"]["fits"] and est2["cap"]["dollars"] == pytest.approx(0.36, abs=0.02)  # the guide's ~$0.36
 
 
 def test_template_chapters_title_and_places():

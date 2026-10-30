@@ -4,6 +4,7 @@
 [defaults]
 generate-visuals = true  # AI images / stock for scenes without [visual:]  (one run without: --no-generate-visuals)
 check-images = true      # vision check for extra fingers, limbs, text; ~40 neurons an image  (--no-check-images)
+# every final render also sharpens its images with Real-ESRGAN on Kaggle (originals if Kaggle fails)
 style ="photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
 engine = "chatterbox"  # Chatterbox on a free Kaggle GPU; "edge" for the voice below without Kaggle
 chatterbox-emotion = 0.5   # the "natural" sample: 0.25 flat ... 2.0 theatrical
@@ -11,8 +12,10 @@ chatterbox-cfg = 0.5       # ~0.3 keeps the pace natural at high emotion
 # chatterbox-voice = "voices/my_voice.wav"   # optional reference clip: only a voice you have the right to use
 voice = "en-US-EmmaMultilingualNeural"  # the Edge voice: used with engine = "edge", and if Chatterbox fails
 rate = "+5%"
-image-provider = "auto"  # auto = Cloudflare, then Pollinations (images and prompts) once the allowance runs out;
-                         # or "cloudflare" (title cards when it runs out) / "pollinations" (no Cloudflare images)
+# Cloudflare makes every final prompt and image (Workers Paid bills past the free 10,000 neurons a day).
+# Pollinations is only the backup for a scene Cloudflare still fails after a retry, or past the cap below.
+max-daily-neurons = 60000  # daily spending cap, Nairobi time: about $0.55 a day beyond the free 10,000; 0 = no cap
+draft-images = false       # true = every run is a quick Pollinations draft to Working/<name>_DRAFT.mp4  (--draft)
 media = "mixed"      # mixed = stock footage where it matches well, else AI images; "stock" or "ai"
 stock = "auto"       # auto = Pexels and Pixabay, whichever has a key in .env; or "pexels" / "pixabay"
 caption-style = "auto"  # auto = bold for vertical, clean for horizontal; or "bold" / "clean" / "minimal" for both

@@ -88,7 +88,7 @@ def test_comments_are_never_spoken_captioned_or_used_in_prompts(tmp_path, monkey
     for s in scenes:
         s.setdefault("visual", None)
     av.generate_scene_visuals(scenes, prompts, prompts_only=True, characters=mv.parse_characters(p),
-                              providers=av.Providers("cloudflare", creds=("a", "t")))
+                              providers=av.Providers("final", creds=("a", "t")))
     sent = " ".join(fake.requests) + prompts.read_text(encoding="utf-8")
     assert "SECRET" not in sent and "SECRET" not in " ".join(s["image_prompt"] for s in scenes)
     assert "a girl in a yellow dress" in scenes[0]["image_prompt"]  # the character line still works
@@ -111,7 +111,7 @@ def test_visuals_lines_reach_image_prompts_but_are_never_spoken(tmp_path, monkey
     fake = FakeText(["hands placing a clay pot", "tomatoes in a pot"])
     monkeypatch.setattr(av, "cf_run", fake)
     prompts = tmp_path / "p.json"
-    providers = av.Providers("cloudflare", creds=("a", "t"))
+    providers = av.Providers("final", creds=("a", "t"))
     av.generate_scene_visuals(scenes, prompts, prompts_only=True, providers=providers)
     assert "this is what the image must show): HACK 1 NIGERIA - Visuals: hands placing" in fake.requests[0]
     assert "Visuals: fresh tomatoes" in fake.requests[1]
@@ -129,7 +129,7 @@ def test_changed_description_rewrites_only_that_prompt(tmp_path, monkeypatch):
     fake = FakeText(["NEW 2"])
     monkeypatch.setattr(av, "cf_run", fake)
     scenes = mv.parse_script(p)
-    av.generate_scene_visuals(scenes, prompts, prompts_only=True, providers=av.Providers("cloudflare", creds=("a", "t")))
+    av.generate_scene_visuals(scenes, prompts, prompts_only=True, providers=av.Providers("final", creds=("a", "t")))
     saved = [s["prompt"] for s in json.loads(prompts.read_text(encoding="utf-8"))["scenes"]]
     assert saved == ["OLD 1", "NEW 2"] and len(fake.requests) == 1
 
@@ -223,8 +223,8 @@ def test_check_estimates_upscaling_on_kaggle(tmp_path, monkeypatch):
         check(tmp_path, "One scene.\n", "--upscale")  # the flag is gone
 
 
-def test_pollinations_images_cost_no_cloudflare_neurons(tmp_path):
-    est = check(tmp_path, "One scene.\n", "--image-provider", "pollinations")["estimates"]
+def test_draft_images_cost_no_cloudflare_neurons(tmp_path):
+    est = check(tmp_path, "One scene.\n", "--draft")["estimates"]
     assert est["images_new"] == 1 and est["neurons_images"] == 0
 
 
@@ -291,7 +291,7 @@ def run_prompts(tmp_path, monkeypatch, texts, replies, characters=None, style=""
     scenes = [{"text": t, "visual": None} for t in texts]
     prompts = tmp_path / "p.json"
     av.generate_scene_visuals(scenes, prompts, style=style, prompts_only=True, characters=characters,
-                              providers=av.Providers("cloudflare", creds=("a", "t")))
+                              providers=av.Providers("final", creds=("a", "t")))
     return scenes, fake, json.loads(prompts.read_text(encoding="utf-8"))
 
 
@@ -332,7 +332,7 @@ def test_edited_sheet_in_prompts_json_is_reused(tmp_path, monkeypatch):
                              "scenes": [{"narration": "Ama sings.", "prompt": "a girl singing"}]}))
     monkeypatch.setattr(av, "cf_run", lambda *a, **k: pytest.fail("saved prompt should be reused"))
     scenes = [{"text": "Ama sings.", "visual": None}]
-    av.generate_scene_visuals(scenes, p, prompts_only=True, providers=av.Providers("cloudflare", creds=("a", "t")))
+    av.generate_scene_visuals(scenes, p, prompts_only=True, providers=av.Providers("final", creds=("a", "t")))
     assert scenes[0]["image_prompt"].startswith("a girl singing, with girl in a green dress")
 
 
@@ -361,7 +361,7 @@ def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, 
             av.save_image(b"jpg", av.image_path(av.full_prompt(shot, "", z), av.IMAGE_MODEL, z))
     av.save_verdict(av.image_path(av.full_prompt("a girl running", "", "horizontal"), av.IMAGE_MODEL, "horizontal"),
                     {"ok": True, "problems": [], "score": 9})
-    est = check(tmp_path, text, "--style", "")["estimates"]
+    est = check(tmp_path, text, "--style", "", "--no-check-images")["estimates"]
     assert (est["images_cached"], est["images_new"], est["checks"]) == (4, 0, 0)
     est = check(tmp_path, text, "--style", "", "--redo-scenes", "2", "--check-images")["estimates"]
     assert (est["images_cached"], est["images_new"]) == (2, 2)

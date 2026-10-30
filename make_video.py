@@ -7,7 +7,12 @@ Each video gets its own folder, Exports/<name>/ (<name> = the script's name, or 
   Upload/thumbnail.jpg              1280x720 thumbnail
   Upload/youtube.md                 titles, descriptions, chapters and tags, a section per Short (--no-metadata skips)
   Working/                          prompts.json, media.json, image_checks.json, captions (.srt), log.txt, Kaggle job
-                                    files and temporary renders
+                                    files and temporary renders; <name>_DRAFT.mp4 from --draft, preview.mp4 from
+                                    --preview-scenes, thumbnail_ideas/ and style_tests/
+
+The plain command is a full final render: Cloudflare images and prompts (the Pollinations backup only for a scene
+Cloudflare still fails after a retry, or past max-daily-neurons), stock footage where it fits, the image check and
+Kaggle upscaling. --draft is the quick Pollinations version.
 
 Rendering (--renderer): remotion (default; remotion_render.py and remotion/) animates stills with eased pans, zooms and
 subtle parallax, crossfades, animated captions, place labels, a world map and a branded intro/outro. ffmpeg is the fast,
@@ -28,7 +33,8 @@ Usage:
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --format vertical --music "Raw Footage\\song.mp3"
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --engine kokoro --voice am_michael
-  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --generate-visuals --style "cinematic, warm tones"
+  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --draft   (quick Pollinations draft, Working/demo_DRAFT.mp4)
+  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --style "cinematic, warm tones"
 """
 import argparse
 import asyncio
@@ -654,23 +660,36 @@ def parse_args(argv=None):
                     help="TTF/OTF for captions and title cards (default: bundled Noto Sans Bold)")
     # on/off options you may set in make_video.toml also get a --no-... form to turn them off for one run
     on_off = argparse.BooleanOptionalAction
-    ap.add_argument("--generate-visuals", action=on_off, default=False,
-                    help="AI images (or stock, see --media) for scenes without a [visual:] line (see --image-provider)")
+    ap.add_argument("--generate-visuals", action=on_off, default=True,
+                    help="AI images (or stock, see --media) for scenes without a [visual:] line (default on)")
     ap.add_argument("--media", choices=["mixed", "stock", "ai"], default="mixed",
                     help="with --generate-visuals: mixed = Pexels/Pixabay footage or photos where one matches well, "
                          "else AI images (default); stock = stock wherever anything relevant exists; ai = never stock. "
                          "'# media: ai' / '# media: stock' lines force a scene. --media stock turns on --generate-visuals")
     ap.add_argument("--stock", choices=["auto", "pexels", "pixabay"], default="auto",
                     help="stock provider: auto = every one with a key in .env (PEXELS_API_KEY, PIXABAY_API_KEY)")
-    ap.add_argument("--image-provider", choices=ai_visuals.PROVIDERS, default="auto",
-                    help="auto = Cloudflare, then Pollinations once Cloudflare's daily allowance is used up")
+    ap.add_argument("--draft", "--draft-images", dest="draft_images", action=on_off, default=False,
+                    help="a quick draft: Pollinations draws the images (their own cache, never used in a final render); "
+                         "one format to Working/<name>_DRAFT.mp4 with a DRAFT label, never to Upload/; no upscaling, "
+                         "image checks, Shorts or YouTube notes")
+    ap.add_argument("--max-daily-neurons", type=int, default=ai_visuals.MAX_DAILY_NEURONS,
+                    help="daily Cloudflare spending cap, counted per day in Nairobi time: once reached, no more "
+                         "Cloudflare images or prompts that day and the rest use the Pollinations backup. 0 = no cap "
+                         "(default 60000, about $0.55 a day beyond the free 10,000)")
+    ap.add_argument("--thumbnail-ideas", type=int, default=0, metavar="N",
+                    help="brainstorm: N thumbnail options drawn by Pollinations into Working/thumbnail_ideas/, then stop")
+    ap.add_argument("--style-test", default="", metavar='"style one | style two"',
+                    help="brainstorm: draw one scene (--style-test-scene) once in each style with Pollinations, into "
+                         "Working/style_tests/, then stop")
+    ap.add_argument("--style-test-scene", type=int, default=0, metavar="N",
+                    help="the scene --style-test draws (default: the first scene without a [visual:] file)")
     ap.add_argument("--text-model", default=ai_visuals.TEXT_MODEL,
                     help="Workers AI model that writes the image prompts (~50 neurons a scene)")
     ap.add_argument("--style", default="", help='appended to every image prompt, e.g. "cinematic, warm tones"')
     ap.add_argument("--preview-scenes", default="", metavar='"1,6,8"',
                     help="render only these scenes (with their voice, captions and visuals) in one format, the "
                          "horizontal one unless --format vertical, to Exports/<name>/Working/preview.mp4, to compare "
-                         "quickly; makes any missing images for those scenes only")
+                         "quickly; always a draft (Pollinations images, DRAFT label)")
     ap.add_argument("--visuals-only", action="store_true",
                     help="make and cache the prompts and images (with their checks, stock and upscaling), then stop "
                          "before the voice and video: for scripts that need several days of Cloudflare allowance")
@@ -684,10 +703,10 @@ def parse_args(argv=None):
     ap.add_argument("--redo-scenes", default="", metavar='"3,7"',
                     help="draw only these scenes' images again with a new seed; every other scene keeps its cached "
                          "images and prompts (turns on --generate-visuals)")
-    ap.add_argument("--check-images", action=on_off, default=False,
+    ap.add_argument("--check-images", action=on_off, default=True,
                     help="look at every AI image with a Cloudflare vision model for extra or missing limbs, fingers or "
                          "faces and stray text; failures are redrawn with a new seed up to 2 times, then the best is kept "
-                         "and flagged (~40 neurons a check)")
+                         "and flagged (~40 neurons a check; default on, off for drafts)")
     ap.add_argument("--vision-model", default=ai_visuals.VISION_MODEL, help="Workers AI model for --check-images")
     ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL,
                     help="Workers AI image model: a short name (" + ", ".join(ai_visuals.IMAGE_MODELS) +
@@ -731,8 +750,8 @@ def parse_args(argv=None):
     ap.add_argument("--channel", default="Smart Village Boy", help="channel name used in the YouTube metadata")
     ap.add_argument("--keep-work", action="store_true", help="keep intermediate files")
     ap.add_argument("--check", action="store_true",
-                    help="check the script and estimate length, Cloudflare neurons and render time, then stop "
-                         "(no audio, images or network)")
+                    help="check the script and estimate length, Cloudflare neurons and their cost, the daily cap, "
+                         "Kaggle time and render time, then stop (no audio, images or network)")
     ap.set_defaults(**load_config(ap))
     args = ap.parse_args(argv)
     if args.vertical:
@@ -742,6 +761,9 @@ def parse_args(argv=None):
     args.preview = parse_scene_numbers(args.preview_scenes, ap)
     if args.no_parallax:
         args.depth = "off"
+    if args.thumbnail_ideas < 0:
+        ap.error("--thumbnail-ideas needs a number of options, like 4")
+    args.draft = bool(args.draft_images or args.preview)  # a preview is always a draft
     args.generate_visuals |= args.prompts_only or args.visuals_only or bool(args.redo) or args.media == "stock"
     return args
 
@@ -786,7 +808,11 @@ def main():
     import outputs
     out = outputs.Outputs.for_script(args.output, script).make()
     with outputs.Tee(out.log):
-        produce(args, script, scenes, font_path, out)
+        if args.thumbnail_ideas or args.style_test:
+            import brainstorm
+            brainstorm.run(args, script, scenes, font_path, out)
+        else:
+            produce(args, script, scenes, font_path, out)
 
 
 TWO_SHOT_SECONDS = 6.0  # scenes whose narration runs longer get a second shot (--two-shots)
@@ -811,26 +837,64 @@ def annotate(scenes, script):
         s["location"] = forced[i] if len(forced) == len(scenes) else None
 
 
+def redo_command(numbers, argv=None):
+    """The command that redraws these scenes with Cloudflare: this run's own command with --redo-scenes."""
+    argv, keep, skip = list(sys.argv[1:] if argv is None else argv), [], False
+    for a in argv:
+        if skip:
+            skip = False
+        elif a == "--redo-scenes":
+            skip = True
+        elif not a.startswith("--redo-scenes="):
+            keep.append(a)
+    quote = lambda a: f'"{a}"' if not a or any(c in a for c in ' "&|<>^') else a  # noqa: E731
+    return " ".join([".venv\\Scripts\\python", "make_video.py", *map(quote, keep),
+                     "--redo-scenes", f'"{",".join(map(str, numbers))}"'])
+
+
+def backup_report(providers, failed):
+    """A final render's scenes that aren't all Cloudflare's work (the Pollinations backup or a title card), and the
+    command that redraws them with Cloudflare. Printed at the end of the run, so it's in Working/log.txt too."""
+    backup = getattr(providers, "backup", None) or {}
+    numbers = sorted(set(backup) | set(failed))
+    if not numbers:
+        return
+    print(f"\nWARNING: {len(numbers)} scene(s) aren't Cloudflare's work in this final render:")
+    for n in numbers:
+        print(f"  scene {n}: {backup.get(n) or 'a title card (no image could be made)'}")
+    print("Redraw them with Cloudflare (once it works again, or tomorrow under the daily cap) with:")
+    print(f"  {redo_command(numbers)}")
+
+
 def produce(args, script, scenes, font_path, out):
     """Visuals, voice, captions, the videos and the YouTube notes, into the video's folder (`out`: outputs.Outputs).
-    With --preview-scenes, only those scenes, in one format, to Working/preview.mp4."""
+    A draft (--draft) or --preview-scenes renders one format with Pollinations images to Working/ (render_draft)."""
     formats = list(FORMATS) if args.format == "both" else [args.format]
     annotate(scenes, script)
     preview = sorted(args.preview)
+    draft = args.draft
+    if draft:
+        formats = ["vertical"] if args.format == "vertical" else ["horizontal"]
+        if args.check_images:
+            print("Draft: no image checks (draft images are never used in a final render).")
+            args.check_images = False
     if preview:
         if (bad := [n + 1 for n in preview if not 0 <= n < len(scenes)]):
             sys.exit(f"--preview-scenes: there is no scene {', '.join(map(str, bad))} (the script has {len(scenes)})")
-        formats = ["vertical"] if args.format == "vertical" else ["horizontal"]
-        print(f"Preview of scene(s) {', '.join(str(n + 1) for n in preview)} ({formats[0]})")
+        print(f"Preview of scene(s) {', '.join(str(n + 1) for n in preview)} ({formats[0]}, draft images)")
+    elif draft:
+        print(f"Draft render ({formats[0]}): Pollinations images, to {out.working}")
     picked = [scenes[i] for i in preview] if preview else scenes
     failed_visuals = []
+    providers = None
     if args.generate_visuals:
         if (bad := sorted(n + 1 for n in args.redo if not 0 <= n < len(scenes))):
             sys.exit(f"--redo-scenes: there is no scene {', '.join(map(str, bad))} (the script has {len(scenes)})")
         if (own := sorted(n + 1 for n in args.redo if scenes[n]["visual"])):
             print(f"Note: scene(s) {', '.join(map(str, own))} use your own [visual:] file, so --redo-scenes skips them.")
-        providers = ai_visuals.Providers(args.image_provider, args.image_model, args.text_model,
-                                         new_images=args.new_images, vision_model=args.vision_model)
+        providers = ai_visuals.Providers("draft" if draft else "final", args.image_model, args.text_model,
+                                         new_images=args.new_images, vision_model=args.vision_model,
+                                         cap=args.max_daily_neurons)
         plan = {}
         if not args.prompts_only:
             import script_check
@@ -839,30 +903,35 @@ def produce(args, script, scenes, font_path, out):
                                     script_check.estimated_seconds(picked, args), parse_characters(script))
         failed_visuals = ai_visuals.generate_scene_visuals(
             scenes, out.prompts, style=args.style, regenerate=args.regenerate,
-            prompts_only=args.prompts_only, provider=args.image_provider, providers=providers,
+            prompts_only=args.prompts_only, providers=providers,
             characters=parse_characters(script), formats=formats, redo=args.redo, check=args.check_images,
             only=set(preview) or None, second_shots=two_shot_scenes(scenes, args))
         if args.prompts_only:
             print("Prompts only: review and edit the file above, then rerun with --generate-visuals.")
             return
-        if not preview:  # a preview covers a few scenes; the full run's records stay as they are
+        if not draft:  # a draft's pictures aren't the final render's; its records stay as they are
             stock.write_media_json(scenes, plan, out.media)
             if args.check_images:
                 ai_visuals.write_check_report(scenes, out.checks)
     elif args.regenerate:
         print("Note: --regenerate only applies with --generate-visuals.")
     notes = []  # warnings repeated at the end of the run
-    import upscale  # every render: sharper images from Kaggle, or the originals with a warning
-    upscale.upscale_scenes(picked, formats, work=out.kaggle("upscale"), notes=notes)
+    if not draft:
+        import upscale  # every final render: sharper images from Kaggle, or the originals with a warning
+        upscale.upscale_scenes(picked, formats, work=out.kaggle("upscale"), notes=notes)
     if args.visuals_only:
         missing = f" Still missing: scene(s) {', '.join(map(str, failed_visuals))}." if failed_visuals else ""
         print(f"Visuals only: prompts and images are saved and cached; no voice or video was made.{missing} "
               "Run the same command without --visuals-only to render.")
+        if not draft:
+            backup_report(providers, failed_visuals)
+        for note in notes:
+            print(f"WARNING: {note}")
         return
     if args.engine == "kokoro":  # voice prerequisites only now: --visuals-only and --prompts-only never need them
         check_kokoro_model()
-    if preview:
-        return render_preview(args, script, picked, font_path, out, formats[0])
+    if draft:
+        return render_draft(args, script, picked, font_path, out, formats[0], preview=bool(preview))
     work = out.render
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -917,19 +986,39 @@ def produce(args, script, scenes, font_path, out):
         print(f"  {path}")
     if srt:
         print(f"  captions: {out.srt}" + (f" and {len(part_srts)} Short captions" if part_srts else ""))
-    print(f"Ready to upload: {out.upload}")
     if failed_visuals:
         print(f"Image generation failed for scene(s) {', '.join(map(str, failed_visuals))}; "
               "they use title cards. Rerun later to retry (successful images are cached).")
+    backup_report(providers, failed_visuals)
     for note in notes:
         print(f"WARNING: {note}")
+    print(f"FINAL render: ready to upload from {out.upload}")
 
 
-def render_preview(args, script, scenes, font_path, out, fmt):
-    """--preview-scenes: voice, captions and one format for the picked scenes only, to Working/preview.mp4. No Shorts,
-    caption file or YouTube notes, and the full run's prompts, media and check records are left as they were."""
+def stamp_draft(video, font_path):
+    """Burn a small "DRAFT" label into the top-right corner of every frame (the sound is copied as it is)."""
+    from PIL import Image, ImageDraw, ImageFont
+    font = ImageFont.truetype(str(font_path), 36)
+    left, top, right, bottom = font.getbbox("DRAFT")
+    pad = 12
+    label = Image.new("RGBA", (right - left + 2 * pad, bottom - top + 2 * pad), (190, 30, 30, 210))
+    ImageDraw.Draw(label).text((pad - left, pad - top), "DRAFT", font=font, fill=(255, 255, 255, 255))
+    png, tmp = video.with_name(f"{video.stem}_label.png"), video.with_name(f"{video.stem}_labelled.mp4")
+    label.save(png)
+    run(["ffmpeg", "-y", "-i", str(video), "-i", str(png), "-filter_complex", "[0:v][1:v]overlay=W-w-32:32[v]",
+         "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+         "-c:a", "copy", "-movflags", "+faststart", str(tmp)])
+    tmp.replace(video)
+    png.unlink(missing_ok=True)
+    return video
+
+
+def render_draft(args, script, scenes, font_path, out, fmt, preview=False):
+    """--draft (every scene, to Working/<name>_DRAFT.mp4) or --preview-scenes (the picked scenes, to
+    Working/preview.mp4): voice, captions and one format, with a DRAFT label on every frame. Never to Upload/; no
+    Shorts, caption file, YouTube notes or upscaling, and the final render's media and check records stay as they were."""
     import outputs
-    work = out.working / "preview_render"
+    work = out.working / ("preview_render" if preview else "draft_render")
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     args.kaggle_work = out.kaggle("chatterbox")
@@ -939,15 +1028,17 @@ def render_preview(args, script, scenes, font_path, out, fmt):
     if not args.no_captions:
         srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
                                     args.whisper_model, args.caption_words)
-    target = outputs.PreviewOutputs(out.folder, out.name)
+    target = (outputs.PreviewOutputs if preview else outputs.DraftOutputs)(out.folder, out.name)
     if args.renderer == "remotion":
         import remotion_render
         remotion_render.render_all(scenes, work, narration, chunks, font_path, args, [fmt], target, script, [])
     else:
         render_format(fmt, scenes, work, narration, srt, font_path, args, target.video(fmt))
+    stamp_draft(target.video(fmt), font_path)
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
-    print(f"Preview: {target.video(fmt)} ({duration(target.video(fmt)):.1f}s)")
+    print(f"{'Preview' if preview else 'Draft'}: {target.video(fmt)} ({duration(target.video(fmt)):.1f}s)")
+    print(f"DRAFT render: {out.working} (not for upload; the plain command makes the final render)")
     return target.video(fmt)
 
 
