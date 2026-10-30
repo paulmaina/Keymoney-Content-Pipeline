@@ -194,6 +194,8 @@ Other tools
         or directly:  .venv\Scripts\python research.py "water storage village hacks" --max 15
     Fact-check (Claude Code skill): /fact-check Scripts\MyVideo.txt   -> Research\MyVideo_factcheck.md
     Tests:                          .venv\Scripts\python -m pytest -q
+    Code changes go to main through a GitHub pull request: GitHub Actions runs the same tests (and the Remotion type
+    check) on every PR; merge once the checks are green.
 
 
 5. LIMITS AND COSTS

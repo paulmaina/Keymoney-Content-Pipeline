@@ -504,6 +504,9 @@ maths, camera moves that never show an edge, per-format images, caption timing, 
 All Cloudflare, Pollinations, Pexels, Pixabay, Kaggle, YouTube and transcript calls are mocked, so they don't need FFmpeg, a GPU or internet. They also check that
 `kaggle/upscale.ipynb` and `kaggle/chatterbox.ipynb` match their `.py` sources. After editing the `.py`, run `.venv\Scripts\python kaggle\build_notebook.py`.
 
+**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the tests on Windows and the Remotion type check on every pull request and
+on `main`, with no secrets. Changes reach `main` through a pull request whose checks pass.
+
 ## Credits
 The bundled font, `assets/fonts/NotoSans-Bold.ttf`, is licensed under the SIL Open Font License (`assets/fonts/OFL.txt`).
 Map shapes come from [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth, public domain). The parallax depth model is
