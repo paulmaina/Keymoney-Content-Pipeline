@@ -1,4 +1,4 @@
-﻿*.mp4
+*.mp4
 !assets/demo/*.mp4
 
 # voice models are large; fetch them with download_models.py
@@ -11,15 +11,19 @@ generated/
 .venv/
 __pycache__/
 .pytest_cache/
-Exports/.work_*/
-Exports/.clips_*/
-Exports/*_video_job/
-Exports/*_video_job.zip
-Exports/*_kaggle/
-# each video's temporary files: renders, Kaggle job files and run logs
-Exports/*/Working/render/
-Exports/*/Working/kaggle/
-Exports/*/Working/log.txt
+# renders and every file made for them stay on this PC
+Exports/*
+!Exports/.gitkeep
 
-# research.py transcripts: other creators' words, for analysis only
-Research/_raw/
+# research notes and research.py transcripts (other creators' words, for analysis only)
+Research/
+
+# the user's own scripts; only the template is shared
+Scripts/*
+!Scripts/TEMPLATE.txt
+
+# local Claude Code state
+.claude/worktrees/
+.claude/settings.local.json
+
+*.log

@@ -220,7 +220,7 @@ beyond them.)
   rendered in 286 s horizontal + 336 s vertical; the whole run took 12 min against 6.5 min with `--renderer ffmpeg`. Run it in the background.
 - When writing a script, name places in the narration ("In Ladakh, India, ...", "northern Nigeria") so labels and pins appear.
 - Design tweaks go in `remotion/src/` (colours in `theme.ts`); run `npm run typecheck` there afterwards, and preview with
-  `npx remotion studio`. `.claude/skills/remotion-*` hold Remotion's own best practices: drive animation with
+  `npx remotion studio`. `.claude/skills/remotion-best-practices` holds Remotion's own best practices (one router skill with captions, maps, markup and render guides inside): drive animation with
   `useCurrentFrame()` + `interpolate()`/`spring()`, never CSS transitions.
 
 ### YouTube metadata and thumbnail (on by default)
