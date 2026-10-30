@@ -20,3 +20,5 @@ template in the same change; `tests/test_script_guide.py` checks the template st
   render, and ask before any Cloudflare or Kaggle work beyond what the user asked for.
 - Only use reference voices the user has the right to use.
 - Commit only when the user asks.
+- Changes reach `main` only through a pull request: work on a branch, push the branch, open a PR against `main` with
+  `gh pr create`, and merge it only when the user says so. Never merge into `main` locally or push straight to `main`.
