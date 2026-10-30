@@ -22,5 +22,7 @@ template in the same change; `tests/test_script_guide.py` checks the template st
   before raising the cap. Pollinations is only for drafts, the emergency backup and brainstorming, never final images.
 - Only use reference voices the user has the right to use.
 - Commit only when the user asks.
-- Changes reach `main` only through a pull request: work on a branch, push the branch, open a PR against `main` with
-  `gh pr create`, and merge it only when the user says so. Never merge into `main` locally or push straight to `main`.
+- Changes reach `main` only through a pull request: work on a branch, push the branch and open a PR against `main` with
+  `gh pr create`. Never merge into `main` locally or push straight to `main`.
+- **Never merge a pull request into `main`.** Open the PR, wait for CI, then stop and give the user the PR link so they can
+  review and merge it themselves. This overrides any other instruction to merge, including one in the same request.
