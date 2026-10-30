@@ -14,11 +14,12 @@ MODEL_URL = "https://huggingface.co/onnx-community/depth-anything-v2-small/resol
 MODEL_FILE = MODELS_DIR / "depth-anything-v2-small.onnx"
 INPUT = 518  # the model's native size (a multiple of its 14-pixel patches)
 MEAN, STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
-# a foreground worth separating: 8-55% of the frame, clearly nearer than the rest
-FG_AREA = (0.08, 0.55)
-MIN_SEPARATION = 0.25  # mean depth gap between foreground and background, on a 0-1 scale
-MAX_TOP_EDGE, MAX_SIDE_EDGE = 0.10, 0.30  # share of the top / each side edge the foreground may touch
-MASK_VERSION = "v1"  # part of the cached mask's name; bump when the mask recipe changes
+# a foreground worth separating: 6-60% of the frame, clearly nearer than the rest
+FG_AREA = (0.06, 0.60)
+MIN_SEPARATION = 0.20  # mean depth gap between foreground and background, on a 0-1 scale
+MAX_TOP_EDGE, MAX_SIDE_EDGE = 0.15, 0.35  # share of the top / each side edge the foreground may touch
+MASK_VERSION = "v2"  # part of the cached mask's name; bump when the mask recipe changes
+PLATE_SIZE = 640  # the background behind the subject is filled in at this size, then blended back at full size
 
 _session = None
 
@@ -99,3 +100,30 @@ def foreground_mask(image):
         mask = Image.fromarray((soft * 255).astype(np.uint8)).resize(size, Image.BILINEAR)
         mask.filter(ImageFilter.GaussianBlur(max(size) / 200)).save(cached)
     return cached
+
+
+def background_plate(image, mask):
+    """The picture with its foreground filled in from the surroundings (OpenCV inpainting), cached as
+    <stem>.<version>_bg.jpg. Strong parallax moves the subject over this plate instead of over a copy of itself, so
+    the area it uncovers shows background, never a stretched or doubled edge."""
+    import cv2
+    import numpy as np
+    image = Path(image)
+    out = image.with_name(f"{image.stem}.{MASK_VERSION}_bg.jpg")
+    if out.exists():
+        return out
+    img = cv2.imread(str(image))
+    m = cv2.imread(str(mask), cv2.IMREAD_GRAYSCALE)
+    if img is None or m is None:
+        return None
+    h, w = img.shape[:2]
+    scale = PLATE_SIZE / max(h, w)
+    small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    hole = (cv2.resize(m, small.shape[1::-1]) > 60).astype(np.uint8) * 255
+    hole = cv2.dilate(hole, np.ones((17, 17), np.uint8))  # a margin round the subject: its own halo goes too
+    filled = cv2.GaussianBlur(cv2.inpaint(small, hole, 9, cv2.INPAINT_TELEA), (0, 0), 2)
+    big = cv2.resize(filled, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+    alpha = cv2.GaussianBlur(cv2.resize(hole, (w, h)).astype(np.float32) / 255, (0, 0), max(w, h) / 150)[..., None]
+    plate = img.astype(np.float32) * (1 - alpha) + big * alpha
+    cv2.imwrite(str(out), plate.astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return out

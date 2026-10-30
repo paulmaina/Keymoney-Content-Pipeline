@@ -123,7 +123,12 @@ With these defaults, the whole command is `.venv\Scripts\python make_video.py Sc
 | `--format horizontal` / `vertical` / `both` | Which videos to render (default `both`) |
 | `--renderer ffmpeg` | Plain FFmpeg rendering: one slow zoom per image, burned-in captions, no intro. Much faster (default `remotion`) |
 | `--no-branding` | Remotion: leave out the channel intro and outro |
-| `--no-parallax` | Remotion: plain pans and zooms only (skips the depth model) |
+| `--depth strong` | Remotion 2.5D parallax: `strong` (default), `subtle` or `off` (`--no-parallax` is the same as `off`); see [Stills that feel alive](#stills-that-feel-alive) |
+| `--no-overlays` | Remotion: no animated dust, smoke, mist, rain, heat shimmer, firelight, leaves, ripples or light rays |
+| `--camera calm` | Remotion: slow moves and crossfades only (default `bold`: faster pushes, pans and tilts, whip-pan or zoom between chapters) |
+| `--no-sound-effects` | No ambience under the narration (`--sfx-volume 0.5` sets its level) |
+| `--no-two-shots` | One picture per scene (default: scenes over 6 s get a second shot, about doubling the image neurons) |
+| `--preview-scenes "1,6,8"` | Render only those scenes, in one format, to `Working/preview.mp4`, to compare quickly |
 | `--caption-style bold` | Remotion captions: `bold`, `clean` or `minimal` for both formats (default `auto`: bold vertical, clean horizontal) |
 | `-o Promo` | The video's folder and name (default: the script's name): `Exports\Promo\Upload\Promo.mp4` and so on. A path (`-o D:\Videos\Promo`) is used as the folder |
 | `--engine kokoro` | Offline voice instead of Microsoft's online voices |
@@ -205,6 +210,34 @@ headless Chrome on your PC. The voice and music are then mixed by FFmpeg exactly
 too). On an Intel i7-1355U laptop with integrated graphics and 16 GB RAM, Script2 (2:37, 19 scenes) took 286 s to render
 horizontally and 336 s vertically, about 15 frames a second with 6 in parallel. The whole run was 12 minutes, against 6.5 minutes with
 `--renderer ffmpeg`. `--format vertical` or `horizontal` saves about half the render time when you only need one.
+
+### Stills that feel alive
+Every setting below is on by default and has a key in `make_video.toml`. Compare quickly with
+`--preview-scenes "1,6,8,14"`, which renders only those scenes (horizontal, or `--format vertical`) to
+`Exports/<name>/Working/preview.mp4`, making any missing images for just those scenes.
+- **Depth parallax** (`depth = "strong"`): on every picture where the depth model finds a clear foreground (6–60% of the frame,
+  well in front of the rest), the subject grows and drifts over the backdrop, as if the camera moved through the scene. The part
+  of the backdrop behind the subject is filled in from its surroundings (OpenCV inpainting, cached next to the image as
+  `*_bg.jpg`), so what the subject uncovers is background, never a stretched copy of its own edge. `subtle` is the old, gentler
+  version; `off` skips the depth model.
+- **Animated overlays** (`overlays = true`): up to two per picture, chosen from its Visuals line and image prompt: dust, smoke,
+  mist, rain, heat shimmer, firelight flicker, drifting leaves, water ripples or light rays. They're drawn in code inside
+  Remotion (`remotion/src/Overlays.tsx`), so there's nothing to download and no neurons, and they're kept faint. Stock clips
+  and title cards get none.
+- **Bolder camera** (`camera = "bold"`): bigger moves on a faster ease (quick start, gentle settle), including tilts, a push up
+  and a diagonal drift, never the same move twice in a row (also between a scene's two shots). Where a new chapter starts
+  (`# HACK 2 ...`), the cut is a whip-pan or a zoom-through, alternating; every other cut stays a crossfade. `calm` is the old style.
+- **Ambient sound** (`sound-effects = true`, `sfx-volume = 0.5`): a quiet bed of wind, water, birds, fire, a market crowd or
+  rain under each scene, matched from its Visuals line, prompt and narration, faded between scenes and ducked under the voice
+  like the music. Only CC0 sounds are used: five recordings from Wikimedia Commons (licences checked through the Commons API)
+  and a fire crackle generated in code. `assets/sfx/sources.json` records each one's source page, author and licence, and each
+  render writes `Working/sound_effects.json` (which sound plays under which scene). `python sfx.py build <folder>` rebuilds the
+  40-second loops from the downloads.
+- **Two shots per scene** (`two-shots = true`): for scenes longer than 6 seconds, the text model rewrites the image prompt as
+  the same moment from another angle or distance (a close-up of the hands or object, or a wide shot of the setting), the image
+  model draws it, and the scene cuts to it half way through. The second prompt is saved as `prompt2` in `prompts.json` (edit it
+  like the first). It costs about 380 more neurons a scene (its prompt, two images and their checks), so a typical script costs
+  about twice as much; `--check` lists the second shots and their neurons, and `--no-two-shots` turns them off.
 
 ### Vertical Shorts series
 The horizontal video uses the whole script, with no length limit (plan 8–10 minutes or more). The vertical video is the same
@@ -536,4 +569,7 @@ on `main`, with no secrets. Changes reach `main` through a pull request whose ch
 ## Credits
 The bundled font, `assets/fonts/NotoSans-Bold.ttf`, is licensed under the SIL Open Font License (`assets/fonts/OFL.txt`).
 Map shapes come from [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth, public domain). The parallax depth model is
-Depth Anything V2 Small (Apache-2.0). Upscaling uses Real-ESRGAN's weights (BSD-3-Clause) through spandrel (MIT). `.claude/skills/remotion-*` are Remotion's own agent skills ([remotion-dev/skills](https://github.com/remotion-dev/skills)).
+Depth Anything V2 Small (Apache-2.0). The ambient sounds in `assets/sfx/` are CC0: wind ("Howling wind" by Tvabutzku1234), water
+("stream-river-water-up-close" by jackthemurray), birds ("Birds chirping in a garden", recorded in Abuja, by Akum20), market
+("Market activities taking place record" by Aishatu98) and rain ("Light Rain Distant Thunder" by kvgarlic), all from Wikimedia
+Commons (links in `assets/sfx/sources.json`); the fire crackle is generated by `sfx.py`. Upscaling uses Real-ESRGAN's weights (BSD-3-Clause) through spandrel (MIT). `.claude/skills/remotion-*` are Remotion's own agent skills ([remotion-dev/skills](https://github.com/remotion-dev/skills)).

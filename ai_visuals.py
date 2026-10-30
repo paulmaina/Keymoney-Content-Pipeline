@@ -567,6 +567,31 @@ def fallback_prompt(text, description=""):
     return f"{description}. Scene illustrating: {text[:300]}" if description else f"Scene illustrating: {text[:400]}"
 
 
+SECOND_SYSTEM = (
+    "You rewrite an image prompt for a documentary's second shot of the same moment. Keep exactly the same people "
+    "(age, clothing, skin, hair), place, objects, time of day and light. Change only the camera: if the first shot is "
+    "wide or medium, make it a close-up of the key action, hands or object; if it is a close-up, make it a wide shot "
+    "that shows the setting. Keep people in simple, natural poses with relaxed, clearly visible hands. No text, "
+    "logos, split screens or before-and-after. Reply with the new prompt only, in one paragraph under 90 words.")
+CLOSE_WORDS = re.compile(r"\b(close[- ]?up|close view|detail|macro|extreme close)\b", re.I)
+
+
+def fallback_second(prompt):
+    """A second shot without the text model: the other distance, same everything else."""
+    if CLOSE_WORDS.search(prompt):
+        return f"Wide establishing shot showing the whole setting of this moment: {prompt}"
+    return f"Close-up detail of the key action and objects in this moment: {prompt}"
+
+
+def write_second_prompt(prompt, scene, providers):
+    """The prompt for a scene's second shot (--two-shots): ~25 neurons with the 70B text model."""
+    reply = providers.text([{"role": "system", "content": SECOND_SYSTEM},
+                            {"role": "user", "content": f"First shot's prompt: {prompt}\n\n"
+                                                        f"Narration: {scene['text']}"}], max_tokens=160)
+    reply = (reply or "").strip().strip('"')
+    return reply if len(reply) > 40 else fallback_second(prompt)
+
+
 def split_characters(reply):
     """Split the prompt writer's reply into (prompt, {name: description}) from its CHARACTERS: line."""
     m = re.search(r"^\s*\**CHARACTERS?\**\s*:(.*)$", reply, re.I | re.M)
@@ -703,7 +728,7 @@ def saved_prompt(records, scene):
     """The saved prompt for a scene, if it was written for the same narration and visual description.
     A new or edited description line means the prompt is written again."""
     rec = records.get(scene["text"])
-    if rec and rec.get("description", "") == scene.get("description", ""):
+    if rec and rec.get("description", "") == scene.get("description", "") and not rec.get("stand_in"):
         return rec["prompt"]
     return None
 
@@ -789,7 +814,8 @@ def draw(providers, prompt, size, shot, regenerate=False, fresh=False, check=Fal
 
 def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", regenerate=False, creds=None,
                            prompts_only=False, provider="auto", text_model=TEXT_MODEL, providers=None,
-                           characters=None, formats=("horizontal", "vertical"), redo=(), check=False):
+                           characters=None, formats=("horizontal", "vertical"), redo=(), check=False, only=None,
+                           second_shots=None):
     """Fill s["src"] (and s["image_prompt"]) for every scene without a [visual: ...] line. A model that takes a
     size draws one image per format, in s["srcs"] ({format: path}); s["src"] is the first format's.
     `characters` is the script's declared character sheet; recurring characters the prompt writer
@@ -798,8 +824,11 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     images. With `check`, each image is looked over by the vision model and redrawn if it fails (see draw()); scenes that
     still fail are listed in the log and in s["quality_flags"].
     Scenes whose image can't be made keep src None (title card). Returns the 1-based numbers of
-    failed scenes. With prompts_only, stop after writing the prompts file."""
-    targets = [(i, s) for i, s in enumerate(scenes) if not s["visual"] and not s.get("stock")]
+    failed scenes. With prompts_only, stop after writing the prompts file. `only` (0-based indices) limits the work to
+    those scenes (--preview-scenes); the other scenes' saved prompts are kept in the file. Scenes in `second_shots`
+    (0-based) also get a second image of the same moment from another angle (s["srcs2"]), prompt saved as "prompt2"."""
+    targets = [(i, s) for i, s in enumerate(scenes) if not s["visual"] and not s.get("stock")
+               and (only is None or i in only)]
     if not targets:
         return []
     providers = providers or Providers(provider, model, text_model, creds)
@@ -808,6 +837,11 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
         print(f"  the style changed since {prompts_path.name} was written: writing new prompts and character "
               "descriptions for it (your '# character:' lines are kept)")
     saved = {} if fresh else load_prompt_records(prompts_path)
+    # scenes of this script not drawn this run (stock, own files, outside a preview) keep their saved records;
+    # records for narration the script no longer has are dropped
+    others = {s["text"] for s in scenes} - {s["text"] for _, s in targets}
+    kept = [] if fresh else [r for r in load_prompt_file(prompts_path).get("scenes", [])
+                             if isinstance(r, dict) and r.get("narration") in others]
     sheet = build_sheet(characters, {} if fresh else load_characters(prompts_path))
     sizes = providers.sizes(formats)
     shapes = " + ".join("x".join(map(str, dims(z))) for z in sizes)
@@ -819,10 +853,21 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     for i, s in targets:
         description = s.get("description", "")
         prompt = saved_prompt(saved, s)
-        if not prompt:
+        rec = {"scene": i + 1, "description": description, "narration": s["text"]}
+        if prompt:
+            old = saved[s["text"]]
+            if old.get("prompt2") and old.get("prompt2_for") == prompt:  # a second shot written for this same prompt
+                rec.update(prompt2=old["prompt2"], prompt2_for=prompt)
+        else:
             prompt, found = write_prompt(s["text"], previous, providers, style, sheet, description)
             learn(sheet, found, f"{s['text']} {description}")
-        records.append({"scene": i + 1, "description": description, "narration": s["text"], "prompt": prompt})
+            if prompt == fallback_prompt(s["text"], description):
+                rec["stand_in"] = True  # the writer was unavailable: written properly next time
+        rec["prompt"] = prompt
+        if second_shots and i in second_shots and "prompt2" not in rec and not prompts_only:
+            rec.update(prompt2=write_second_prompt(prompt, s, providers) if providers.cf_ok else fallback_second(prompt),
+                       prompt2_for=prompt)
+        records.append(rec)
         previous = prompt
     shots = []  # after the loop, so later-learned characters reach earlier scenes too
     for (i, s), rec in zip(targets, records):
@@ -831,8 +876,9 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
 
     def save(records):
         prompts_path.parent.mkdir(parents=True, exist_ok=True)
+        every = sorted(kept + records, key=lambda r: r.get("scene", 0))
         prompts_path.write_text(json.dumps({"image_model": providers.image_model, "style": style, "characters": sheet,
-                                            "scenes": records}, indent=2, ensure_ascii=False), encoding="utf-8")
+                                            "scenes": every}, indent=2, ensure_ascii=False), encoding="utf-8")
 
     save(records)
     print(f"  prompts saved to {prompts_path} (edit them and rerun to change the images)")
@@ -874,6 +920,26 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
         s["ai"] = True
         print(f"  scene {i + 1}: {'generated' if new else 'cached'} by {rec['image_provider']}: "
               f"{', '.join(p.name for p in dict.fromkeys(paths.values()))}")
+        if rec.get("prompt2"):
+            shot2 = enforce_characters(rec["prompt2"], s["text"], sheet, s.get("description", ""))
+            second = {}
+            for size in sizes:
+                label = f"scene {i + 1} second shot" + ("" if size == "square" else f" {size}")
+                try:
+                    second[size], name, cached, verdict = draw(providers, full_prompt(shot2, style, size), size, shot2,
+                                                               regenerate, i in redo, check, label)
+                except ProviderError as e:
+                    print(f"  {label}: failed ({e}); the scene keeps one shot")
+                    continue
+                made["cached" if cached else name] += 1
+                if verdict:
+                    rec.setdefault("quality2", {})[size] = verdict
+            if second:
+                first2 = next(iter(second.values()))
+                s["src2"] = second.get(sizes[0], first2)
+                if sizes != ["square"]:
+                    s["srcs2"] = {f: second.get(f, first2) for f in formats}
+                print(f"  scene {i + 1}: second shot: {', '.join(p.name for p in dict.fromkeys(second.values()))}")
     save(records)
     summary = ", ".join(f"{n} {k}" for k, n in made.items()) or "none"
     print(f"  images: {summary}; {len(failed)} failed")

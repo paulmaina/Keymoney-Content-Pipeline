@@ -71,6 +71,10 @@ class Outputs:
         return self.working / "image_checks.json"
 
     @property
+    def sound_effects(self):
+        return self.working / "sound_effects.json"
+
+    @property
     def srt(self):
         return self.working / f"{self.name}.srt"
 
@@ -87,6 +91,17 @@ class Outputs:
     @property
     def log(self):
         return self.working / "log.txt"
+
+
+class PreviewOutputs(Outputs):
+    """--preview-scenes: the one video goes to Working/preview.mp4."""
+
+    def video(self, fmt):
+        return self.working / "preview.mp4"
+
+    @property
+    def sound_effects(self):  # the full video's record stays as it was
+        return self.working / "preview_sound_effects.json"
 
 
 class Tee:

@@ -15,3 +15,10 @@ rate = "+5%"
 media = "mixed"      # mixed = stock footage where it matches well, else AI images; "stock" or "ai"
 stock = "auto"       # auto = Pexels and Pixabay, whichever has a key in .env; or "pexels" / "pixabay"
 caption-style = "auto"  # auto = bold for vertical, clean for horizontal; or "bold" / "clean" / "minimal" for both
+# making still pictures feel alive (Remotion)
+depth = "strong"     # 2.5D parallax on pictures with a clear foreground: "strong", "subtle" or "off"
+overlays = true      # subtle dust, smoke, mist, rain, heat shimmer, firelight, leaves, ripples or light rays (drawn in code)
+camera = "bold"      # "bold": faster pushes, pans and tilts, whip-pan / zoom between chapters; "calm": slow, crossfades
+sound-effects = true # quiet CC0 ambience under each scene (wind, water, birds, fire, market, rain), ducked under the voice
+sfx-volume = 0.5     # ambience level before ducking
+two-shots = true     # scenes over 6 s get a second shot of the same moment (about doubles the image neurons; see --check)

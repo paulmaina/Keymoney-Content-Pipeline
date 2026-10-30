@@ -46,9 +46,9 @@ def scene_images(scenes, formats):
     found = []
     for s in scenes:
         for f in formats:
-            src = mv.scene_src(s, f)
-            if src and Path(src).suffix.lower() in mv.IMAGE_EXT and Path(src) not in found:
-                found.append(Path(src))
+            for src in (mv.scene_src(s, f), mv.scene_src2(s, f)):
+                if src and Path(src).suffix.lower() in mv.IMAGE_EXT and Path(src) not in found:
+                    found.append(Path(src))
     return found
 
 
@@ -106,6 +106,10 @@ def apply(scenes):
             s["upscaled_from"], s["src"] = s["src"], new
         if s.get("srcs"):
             s["srcs"] = {f: better(p) for f, p in s["srcs"].items()}
+        if s.get("src2"):
+            s["src2"] = better(s["src2"])
+        if s.get("srcs2"):
+            s["srcs2"] = {f: better(p) for f, p in s["srcs2"].items()}
     return len(swapped)
 
 

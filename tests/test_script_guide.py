@@ -46,11 +46,15 @@ def test_template_s_shorts_cut_only_at_chapter_headings(tmp_path):
 
 
 def test_template_s_cloudflare_days_match_the_guide(tmp_path):
-    a = check(tmp_path, "--check-images")
-    est = a["estimates"]
-    assert est["days"] == -(-int(est["neurons_total"]) // 10_000) and est["days"] >= 2
-    per_scene = (est["neurons_total"] - est["neurons_meta"]) / len(a["rows"])
-    assert 360 <= per_scene <= 420  # the guide's ~390 neurons a scene
+    one = check(tmp_path, "--check-images", "--no-two-shots")
+    est = one["estimates"]
+    assert est["days"] == -(-int(est["neurons_total"]) // 10_000) and est["days"] == 3
+    per_scene = (est["neurons_total"] - est["neurons_meta"]) / len(one["rows"])
+    assert 360 <= per_scene <= 420  # the guide's ~390 neurons a scene with one shot
+    two = check(tmp_path, "--check-images", "--two-shots")
+    est2 = two["estimates"]
+    per_scene2 = (est2["neurons_total"] - est2["neurons_meta"]) / len(two["rows"])
+    assert 720 <= per_scene2 <= 820 and est2["days"] == 5  # ~770 with second shots (every template scene is over 6 s)
 
 
 def test_template_chapters_title_and_places():

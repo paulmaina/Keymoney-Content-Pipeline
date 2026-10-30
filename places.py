@@ -161,7 +161,10 @@ def overrides(path):
 def scene_places(scenes, script=None, first=0):
     """[(scene index, Place, show map, countries pinned before)] for each scene where the place changes. `scenes` may
     be a slice of the script starting at scene `first` (a vertical part), so its '# location:' lines still line up."""
-    forced = overrides(script)[first:first + len(scenes)] if script else []
+    if scenes and all("location" in s for s in scenes):  # annotated by make_video.annotate (any selection of scenes)
+        forced = [s["location"] for s in scenes]
+    else:
+        forced = overrides(script)[first:first + len(scenes)] if script else []
     if len(forced) != len(scenes):
         forced = [None] * len(scenes)
     out, last, visited = [], None, []

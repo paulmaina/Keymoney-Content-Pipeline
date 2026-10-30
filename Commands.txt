@@ -206,6 +206,16 @@ Captions and look
     --no-branding               No intro and outro.
     --renderer ffmpeg           Fast plain render (no Remotion motion, map or intro).
 
+Stills that feel alive (all on by default; each has a line in make_video.toml)
+    --preview-scenes "1,6,8"    Render only those scenes, in one format (horizontal, or --format vertical), to
+                                Exports\MyVideo\Working\preview.mp4. Quick way to compare settings.
+    --depth strong              2.5D parallax with a filled-in background (or subtle / off).
+    --no-overlays               No animated dust, smoke, mist, rain, heat shimmer, firelight, leaves, ripples, light rays.
+    --camera calm               Slow moves and crossfades (default bold: faster moves, whip-pan/zoom between chapters).
+    --no-sound-effects          No ambience. --sfx-volume 0.5 sets how loud it is (it's always ducked under the voice).
+    --no-two-shots              One picture per scene. Default: scenes over 6 s get a second shot of the same moment,
+                                which about doubles the image neurons (--check shows it).
+
 Other tools
     Chatterbox voice samples (one Kaggle run, ~2-3 min GPU), into Exports\voice_samples\:
         .venv\Scripts\python chatterbox_tts.py
@@ -223,8 +233,9 @@ Other tools
 Cloudflare Workers AI: 10,000 free neurons a day.
     Resets at 00:00 UTC = 03:00 Nairobi time (EAT, UTC+3). (Once, on 29 Oct 2026, it accepted calls again earlier
     than that, around 22:12 Nairobi time, so it's worth a try before 03:00.)
-    A first render of a 19-scene script, both formats:
-        images ~5,000 + quality checks ~1,550 + prompts ~880 + titles ~70 + stock scoring (a little)  = about 7,500
+    Per new scene, both formats: about 390 neurons (prompt ~46, two images ~264, two checks ~81), plus about 380 for
+    its second shot if it runs over 6 s (two-shots, on by default). So a 55-scene, 8-minute script is about 42,700
+    neurons (5 days) with second shots, or 21,900 (3 days) with --no-two-shots.
     Redrawn images add ~132 + ~40 each. Cached reruns cost almost nothing. --check shows the total first.
 
 Kaggle: about 30 free GPU hours a week (Kaggle's Settings page shows what's left and when it resets).
@@ -298,6 +309,10 @@ Edge voice fails (no internet)
 
 research.py stops with "blocked"
     YouTube is limiting your IP. Rerun later; transcripts already saved are reused.
+
+The video looks too busy, or a scene's overlay or sound is wrong
+    Turn a feature off in make_video.toml (overlays, camera = "calm", depth = "subtle", sound-effects) and compare with
+    --preview-scenes. Overlays and sounds come from the scene's # Visuals line: reword it (for example, remove "misty").
 
 An error mentioning cv2 / OpenCV
     .venv\Scripts\python -m pip install -r requirements.txt   (OpenCV must stay below version 5).

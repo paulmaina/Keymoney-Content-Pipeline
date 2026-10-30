@@ -7,15 +7,35 @@ export type Move = {
   name: string;
 };
 
+export type Shot = {
+  src: string;
+  width: number; // image size, so the mask lines up with the cover-cropped picture
+  height: number;
+  mask?: string; // foreground mask for the 2.5D parallax
+  plate?: string; // the picture with its foreground filled in (strong depth): what the moving subject uncovers
+  move: Move;
+  from: number; // first frame of this shot within the scene
+};
+
+export type Parallax = {scale: number; shift: number; back: number}; // near layer growth, its drift %, backdrop drift %
+
+export type Overlay = 'dust' | 'smoke' | 'mist' | 'rain' | 'heat' | 'fire' | 'leaves' | 'ripple' | 'rays';
+
 export type Scene = {
   frames: number; // sequence length, including the transition overlap on each side
   kind: 'image' | 'video' | 'card';
   src?: string; // image, or a stock clip already cut to the scene's length
-  width?: number; // image size, so the mask lines up with the cover-cropped picture
+  width?: number;
   height?: number;
-  mask?: string; // foreground mask for the 2.5D parallax
+  mask?: string;
   text?: string; // title card text
   move: Move;
+  shots?: Shot[]; // pictures: one, or two of the same moment that the scene cuts between
+  parallax?: Parallax | null;
+  overlays?: Overlay[];
+  ease?: number[]; // cubic-bezier of the camera move
+  transition?: 'fade' | 'whip' | 'zoom'; // into this scene
+  seed?: number; // varies the overlays from scene to scene
 };
 
 export type CaptionWord = {text: string; start: number; end: number; key: boolean}; // key: number, place, name or hack name
