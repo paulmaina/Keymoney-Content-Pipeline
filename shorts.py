@@ -11,24 +11,34 @@ import make_video as mv
 LIMIT = 170.0  # seconds per part, intro and outro included: 2:50, safely under Shorts' 3 minutes
 
 
-def overhead(branding):
+def overhead(branding, fmt="vertical"):
     """Seconds a cut adds to its narration: the Remotion intro and outro (overlapping by a crossfade each), or half a
-    crossfade without them. The ffmpeg renderer adds nothing."""
+    crossfade without them. The ffmpeg renderer adds nothing. `branding` may be the render's channels.Branding, whose
+    own clips can be longer or shorter than the generated intro and outro; a vertical part counts the longer of its two
+    possible outros (the last part's, or "Watch Part N")."""
     import remotion_render as rr
     if branding is None:
         return 0.0
-    if branding:
+    if branding is True:
         return (rr.INTRO + rr.OUTRO - rr.TRANSITION) / mv.FPS
+    if branding:
+        outro = branding.frames("outro", fmt)
+        if fmt == "vertical":
+            outro = max(outro, branding.frames("next", fmt))
+        return (branding.frames("intro", fmt) + outro - rr.TRANSITION) / mv.FPS
     return rr.TRANSITION // 2 / mv.FPS
 
 
-def part_seconds(durations, branding=True):
-    return sum(durations) + overhead(branding)
+def part_seconds(durations, branding=True, fmt="vertical"):
+    return sum(durations) + overhead(branding, fmt)
 
 
 def branding_of(args):
-    """True with the Remotion intro and outro, False for Remotion without them, None for the ffmpeg renderer."""
-    return None if getattr(args, "renderer", "remotion") != "remotion" else not getattr(args, "no_branding", False)
+    """The channel's intro and outro with Remotion (its channels.Branding, or True for the generated ones), False for
+    Remotion without them, None for the ffmpeg renderer."""
+    if getattr(args, "renderer", "remotion") != "remotion":
+        return None
+    return False if getattr(args, "no_branding", False) else (getattr(args, "branding", None) or True)
 
 
 def chapter_starts(sections):

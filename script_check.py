@@ -32,7 +32,7 @@ def sentences(text):
 
 def speed(rate):
     try:
-        return 1 + int(str(rate).strip().rstrip("%")) / 100
+        return 1 + float(str(rate).strip().rstrip("%")) / 100
     except ValueError:
         return 1.0
 
@@ -92,7 +92,7 @@ def analyse(script, args):
 
     # Cloudflare: prompts and images not already saved/cached cost neurons
     import outputs
-    out = outputs.Outputs.for_script(args.output, script)
+    out = outputs.Outputs.for_script(args.output, script, getattr(args, "channel_id", None))
     prompts_path = out.prompts
     saved = ai_visuals.load_prompt_records(prompts_path)
     sheet = ai_visuals.build_sheet(mv.parse_characters(script), ai_visuals.load_characters(prompts_path))
@@ -186,7 +186,8 @@ def analyse(script, args):
             "declared": mv.parse_characters(script), "estimates": est, "upscale_minutes": upscale_min,
             "total_seconds": sum(r["seconds"] for r in rows), "words": sum(r["words"] for r in rows),
             "prompts_path": prompts_path, "stock": stock_plan(scenes, args, out),
-            "video_seconds": shorts.part_seconds(seconds, branding) if rows else 0.0, "parts": parts,
+            "video_seconds": shorts.part_seconds(seconds, branding, "vertical" if args.format == "vertical" else "horizontal")
+            if rows else 0.0, "parts": parts,
             "part_lines": shorts.describe(parts, seconds, sections, branding) if len(parts) > 1 else []}
 
 
@@ -300,7 +301,8 @@ def report(script, args):
     rows, est = a["rows"], a["estimates"]
     print(f"Script: {script.name}")
     print(f"{len(rows)} scenes, {a['words']} words, about {seconds_label(a['total_seconds'])} of narration "
-          f"({args.engine} voice at {args.rate}, ~{WPM.get(args.engine, WPM['edge'])} words/min at +0%)")
+          f"({args.engine} voice{' ' + args.voice if args.voice else ''} at {args.rate}, "
+          f"~{WPM.get(args.engine, WPM['edge'])} words/min at +0%)")
     if args.format in ("both", "horizontal"):
         print(f"Main video (horizontal): about {seconds_label(a['video_seconds'])} with the intro and outro")
     if a["part_lines"]:
@@ -311,6 +313,7 @@ def report(script, args):
     elif a["parts"] and args.format in ("both", "vertical"):
         print(f"Vertical: one Short of about {seconds_label(a['video_seconds'])}")
     print(f"Style: {args.style or '(none)'}")
+    channel_report(script, args)
     print()
     print("Each scene becomes: image = AI image, own file = your [visual:]; move = strong for [video] scenes")
     print(f"{'#':>3} {'words':>5} {'~sec':>5}  {'becomes':<9} {'move':<7} {'described':<9} narration / own file")
@@ -426,6 +429,38 @@ def report(script, args):
     return a
 
 
+def channel_report(script, args):
+    """The channel, where its videos go, and each intro and outro: the channel's own clip (with its length) or the
+    generated one."""
+    import outputs
+    import shorts
+    profile = getattr(args, "profile", None)
+    if not profile:
+        return
+    folder = outputs.Outputs.for_script(args.output, script, profile.id).folder
+    try:
+        folder = folder.relative_to(mv.ROOT)
+    except ValueError:
+        pass
+    print(f"Channel: {profile.name} ({profile.id}), to {folder}")
+    branding = shorts.branding_of(args)
+    if branding is None:
+        print("Intro and outro: none with --renderer ffmpeg")
+    elif branding is False:
+        print("Intro and outro: none (--no-branding)")
+    elif hasattr(branding, "lines"):
+        formats = list(mv.FORMATS) if args.format == "both" else [args.format]
+        if getattr(args, "draft", False):
+            formats = ["vertical"] if args.format == "vertical" else ["horizontal"]
+        try:
+            where = profile.branding.relative_to(mv.ROOT)
+        except ValueError:
+            where = profile.branding
+        print(f"Intro and outro (your own clips go in {where}):")
+        for line in branding.lines(formats):
+            print(f"  {line}")
+
+
 def render_estimate(narration_seconds, args, seconds=None, parts=()):
     """Local render time for the chosen renderer (Remotion: from the speed measured on this PC); the vertical Shorts
     series adds an intro and outro per part."""
@@ -437,7 +472,7 @@ def render_estimate(narration_seconds, args, seconds=None, parts=()):
         return
     seconds = seconds if seconds is not None else [narration_seconds]
     branding = shorts.branding_of(args)
-    frames = {f: round(shorts.part_seconds(seconds, branding) * mv.FPS) for f in formats}
+    frames = {f: round(shorts.part_seconds(seconds, branding, f) * mv.FPS) for f in formats}
     if "vertical" in frames and len(parts) > 1:
         frames["vertical"] = sum(round(shorts.part_seconds(seconds[a:b], branding) * mv.FPS) for a, b in parts)
     speed, measured = rr.load_speed()

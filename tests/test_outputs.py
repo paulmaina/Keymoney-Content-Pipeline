@@ -63,7 +63,7 @@ def test_a_run_makes_the_upload_and_working_folders_and_logs_there(tmp_path, mon
     monkeypatch.setattr(outputs, "EXPORTS", tmp_path / "Exports")
     monkeypatch.setattr(mv.sys, "argv", ["make_video.py", str(p), "--visuals-only"])
     mv.main()
-    folder = tmp_path / "Exports" / "My Video"
+    folder = tmp_path / "Exports" / "smart_village_boy" / "My Video"
     assert (folder / "Upload").is_dir() and (folder / "Working").is_dir()
     assert seen == {"prompts": folder / "Working" / "prompts.json", "media": folder / "Working" / "media.json"}
     assert "Visuals only" in (folder / "Working" / "log.txt").read_text(encoding="utf-8")

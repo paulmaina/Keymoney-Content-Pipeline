@@ -1,9 +1,13 @@
-# Smart Village Boy script standard
+# Script standard
 
 How to write a script for the AI Video Editor (`make_video.py`). A script written to this standard renders into a narrated,
-captioned full-length horizontal video (8–10 minutes or longer) and a numbered series of vertical Shorts, with no hand fixes. Every rule here matches what the tool's parser and
-`--check` actually do. The example at the end is `Scripts/TEMPLATE.txt`, and a test checks that it still passes `--check`
-with no flags, so the guide stays accurate when the tool changes.
+captioned full-length horizontal video (8–10 minutes or longer) and a numbered series of vertical Shorts, with no hand fixes.
+Every rule here matches what the tool's parser and `--check` actually do. The example at the end is `Scripts/TEMPLATE.txt`,
+and a test checks that it still passes `--check` with no flags, so the guide stays accurate when the tool changes.
+
+The editor makes videos for more than one channel. **Sections 1, 2, 4 and 5 apply to every channel. Section 3 has a short
+style section for each channel**: its host, its chapters, its tone and its voice's pace. Follow the general rules plus the
+section for the channel you're writing for.
 
 **Deliver:** one plain-text `.txt` script in the format below, plus the fact-check notes from section 5 as a separate list.
 Don't add anything else to the script file: no Markdown, no bold, no bullet lists, no "Narration:" labels.
@@ -18,12 +22,16 @@ line that doesn't start with `#` is spoken aloud and captioned, word for word.
 
 ```text
 # Five Village Water Hacks That Beat Drought
+# channel: smart_village_boy
 # note: anything for the editor; never spoken
 # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
 ```
 
 - **Line 1, the title:** `#`, a space, then the working title in Title Case, at least 12 characters, with no `word:` label in
   front. If the AI title writer is unavailable, this becomes the YouTube title.
+- **The channel:** `# channel: <id>` names the channel the video is for, using the id from section 3 (for example
+  `smart_village_boy`). It picks the channel's voice, image style, intro and outro, and its output folder. Write it on the
+  line after the title. Without it the editor uses its default channel.
 - **Comments:** any other `#` line is a comment for the editor (see 1.8).
 - **Characters:** `# character:` lines (see 1.2).
 - The header block must contain **no spoken lines**. A paragraph made only of `#` lines doesn't become a scene. Put a blank line
@@ -41,10 +49,9 @@ line that doesn't start with `#` is spoken aloud and captioned, word for word.
   role in the Visuals lines (see 2.4).
 - The description is for the image model: age, origin, build, hair, clothing and colours. Use short, concrete words ("red cap,
   yellow T-shirt"), not impressions ("cheerful-looking").
-- **Use the exact same line in every script.** The channel host is always:
-  `# character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile`
-- A scene shows a character only when its narration or Visuals line uses the character's name. Write "Smart Village Boy" in
-  full in the Visuals line of every scene he appears in, and never in a scene he shouldn't be in.
+- **Use the exact same line in every script.** A channel's host has one fixed line, given in that channel's section 3.
+- A scene shows a character only when its narration or Visuals line uses the character's name. Write the name in full in the
+  Visuals line of every scene the character appears in, and never in a scene they shouldn't be in.
 - Scenes that name a declared character always get an AI image, never stock footage, so the character stays consistent.
 
 ### 1.3 `# Visuals:` lines: what each scene shows
@@ -76,7 +83,8 @@ line that doesn't start with `#` is spoken aloud and captioned, word for word.
   chapter.
 - **YouTube's rules:** chapters only show if the first is at 0:00, there are at least 3, and each is at least 10 seconds long.
   So start scene 1 with `# HOOK`, and give every section at least 2 scenes. Shorter sections are merged into the previous one.
-- **Standard sections:** HOOK, HACK 1 to HACK 5 (each with its place), then OUTRO.
+- **Standard sections:** start with `# HOOK` and end with `# OUTRO`. Each channel's section 3 gives the chapters in between
+  (Smart Village Boy: HACK 1 to HACK 5, each with its place).
 
 ### 1.5 `[video]`: action scenes
 
@@ -116,7 +124,7 @@ line that doesn't start with `#` is spoken aloud and captioned, word for word.
   region ("Meghalaya", "Ladakh").
 - Add `# location: Place, Country` only when the label would be missing or wrong (for example, a town the narration doesn't
   name). `# location: none` removes a wrong label.
-- Name the country or region in the narration of each hack's first scene, so the label appears where the hack starts.
+- Name the country or region in the narration of each chapter's first scene, so the label appears where the chapter starts.
 
 ### 1.8 Comments
 
@@ -147,7 +155,8 @@ A scene is exactly one picture (or one stock clip) held for as long as its narra
   - Write numbers the way they should be said where a voice could stumble ("40 to 60 watt", "two thousand litres").
   - Don't use abbreviations with full stops ("Dr.", "St.", "e.g."). The tool counts every full stop as the end of a sentence.
 - **Spell names the same way every time.** Captions use the script's spelling.
-- **Narrator voice:** the channel ("we", "you"), not the boy speaking. Smart Village Boy appears on screen; he doesn't narrate.
+- **Narrator voice:** as the channel's section 3 says. Usually the channel itself ("we", "you"); an on-screen host doesn't
+  narrate unless the channel's section says so.
 - **Keep descriptions out of the narration.** "At sunrise on a dusty hilltop, a boy in a red cap..." would be read aloud. Put it
   on the Visuals line.
 
@@ -185,10 +194,24 @@ A scene is exactly one picture (or one stock clip) held for as long as its narra
 - **Dignity:** never put words in a real person's mouth, and never show them in a way that could embarrass them.
 
 
-## 3. Channel style: Smart Village Boy
+## 3. Channel styles
+
+Each channel has a short style section here. Its id is the one to write in the script's `# channel:` line. The channel's
+voice, image style, captions, intro and outro come from its settings file in the editor's project
+(`channels/<id>.toml`), so a script never sets them; this section covers what the script itself must do.
+
+### 3.1 Smart Village Boy (`# channel: smart_village_boy`)
 
 The channel visits the world's villages for clever, low-cost ideas, presented with curiosity and respect.
 
+- **Host:** Smart Village Boy, an invented Kenyan boy. Copy his line exactly into every script:
+  `# character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile`
+  Write "Smart Village Boy" in full in the Visuals line of every scene he appears in. He appears on screen; he doesn't
+  narrate. The narrator is the channel ("we", "you").
+- **Chapters:** `# HOOK`, `# HACK 1 PLACE` to `# HACK 5 PLACE` (each with its country or region), then `# OUTRO`.
+- **Voice and pace:** Kokoro's am_michael at +20% speaks about 190 words a minute. With 2–3 short sentences per scene that
+  is about 7–9 scenes a minute, so an 8-minute video needs about 1,500 spoken words (60–70 scenes). `--check` uses the
+  channel's current voice and speed.
 - **Hook (scenes 1–2):**
   - Scene 1 opens on a vivid problem or a surprising fact in the first sentence, with no greeting before it.
   - Scene 2 welcomes viewers to Smart Village Boy and opens a loop: "Stay to the end for ...", a payoff that really comes last.
@@ -217,29 +240,36 @@ The channel visits the world's villages for clever, low-cost ideas, presented wi
   - Smart Village Boy appears in the hook and the ending, on the same Kenyan hilltop with the wooden globe.
 - **Tone:** warm, curious and clear. Not hype: no "INSANE", no "you won't believe", no exclamation marks in a row.
 
+### 3.2 Adding a channel
+
+Give each new channel a section like 3.1, kept short: its id, what the channel is about, its host line (if it has an
+invented host), its chapter names, its narrator, its voice's pace (`--check` on a sample script shows it), its hook,
+ending and tone. Everything else in this guide applies unchanged.
+
 
 ## 4. Length and cost
 
 **No length cap.** The horizontal video uses the whole script. Plan for **8–10 minutes or longer**.
 
-**Speed.** The default voice speaks about 150–160 words a minute at the channel's +5% speed, plus a short pause after every
-scene, which comes to about **150 words and 6–8 scenes a minute** with 2–3 short sentences per scene. (The speed is still an
-estimate until a full narration is measured; `--check` uses the current figure.)
+**Speed.** Each channel's voice speaks at its own pace (section 3), plus a short pause after every scene. The table is for a
+voice of about **150 words and 6–8 scenes a minute** with 2–3 short sentences per scene (Chatterbox at +5%, or Kokoro at
+about +0%). A faster voice needs more words for the same length: Smart Village Boy's voice at about 190 words a minute needs
+roughly a quarter more. (`--check` uses the channel's current voice and speed.)
 
-| Video length | Scenes | Spoken words |
+| Video length (at ~150 words a minute) | Scenes | Spoken words |
 |---|---|---|
 | 5 minutes | 30–40 | about 750 |
 | **8 minutes** | **50–60** | **about 1,200** |
 | **10 minutes** | **60–75** | **about 1,500** |
 | 12 minutes | 75–90 | about 1,800 |
 
-- **Structure for 8–10 minutes:** a hook of 3–4 scenes, 5 hacks of 8–12 scenes each, and an ending of 2–3 scenes.
+- **Structure for 8–10 minutes:** a hook of 3–4 scenes, 5 main chapters of 8–12 scenes each, and an ending of 2–3 scenes.
 - **Shorts are automatic:** the vertical version is the same script split into parts of under 2:50 each, including the
   intro and outro, at scene boundaries and at chapter headings wherever possible. They're saved as
-  `<name>_Short_Part1.mp4`, `<name>_Short_Part2.mp4` and so on, in the video's `Upload` folder. Each starts with "Part 1 of N", and every part but the
-  last ends with "Watch Part 2" instead of the subscribe card. Keep each `# HACK` section under about 2:40 (around 15
-  scenes), so a chapter fits in one Short and never has to be cut in the middle. `--check` lists every part with its scenes,
-  chapters and length.
+  `<name>_Short_Part1.mp4`, `<name>_Short_Part2.mp4` and so on, in the video's `Upload` folder. Each starts with "Part 1 of N",
+  and every part but the last ends with "Watch Part 2" instead of the subscribe card (or the channel's own intro and outro
+  clips, which can be longer). Keep each chapter under about 2:40 (around 15 scenes), so it fits in one Short and never has
+  to be cut in the middle. `--check` lists every part with its scenes, chapters and length.
 
 **Cloudflare cost.** Cloudflare makes every final image. The first 10,000 "neurons" a day are free; after that the editor's
 paid plan bills **$0.011 per 1,000**, up to a daily cap of **60,000 neurons** (about $0.55 a day beyond the free amount,
@@ -284,13 +314,13 @@ Before handing a script over, check every claim against **1–2 independent, rel
 NGOs running the project, academic or UNESCO pages. A YouTube video or another script doesn't count. List each claim with its
 source links and a verdict (confirmed / unclear / unsupported) in a separate note, not in the script.
 
-- [ ] **Places:** every country, region, town and community name is real, spelled correctly, and is where the hack happens.
+- [ ] **Places:** every country, region, town and community name is real, spelled correctly, and is where the story happens.
 - [ ] **People:** names, roles and nationalities are correct, and the person really did what the script says (invented, revived
       or popularised is not the same).
 - [ ] **Numbers:** quantities, sizes, dates, durations and "how many homes" figures match a source. Round down, or write "about"
       or "up to".
 - [ ] **How it works:** the physical explanation is correct and simple, with no invented mechanism.
-- [ ] **Results:** claims of what the hack achieves are supported, with no "solves", "ends" or "everyone" unless sourced.
+- [ ] **Results:** claims of what an idea achieves are supported, with no "solves", "ends" or "everyone" unless sourced.
 - [ ] **Health and safety:** any water, food, fire, chemical or building claim is supported and doesn't encourage anything
       dangerous (for example, drinking untreated water).
 - [ ] **Culture:** community names, clothing, buildings and practices are described correctly and respectfully.
@@ -302,17 +332,19 @@ In the editor's project, the fact-check skill writes `Research/<script>_factchec
 
 ## 6. Example script (`Scripts/TEMPLATE.txt`)
 
-This exact text is in `Scripts/TEMPLATE.txt` and passes `--check` with no flags or notes:
-- 55 scenes and about 1,220 words, so about 8:09 with the intro and outro
+This exact text is in `Scripts/TEMPLATE.txt` (a Smart Village Boy script) and passes `--check` with no flags or notes:
+- 55 scenes and about 1,220 words: about 8:09 with the intro and outro at ~150 words a minute (Chatterbox at +5%), or
+  about 6:45 with the channel's current voice (Kokoro at +20%)
 - 7 `[video]` scenes and 7 chapters
-- a vertical series of 4 Shorts, cut only at chapter headings
-- about 42,700 neurons with second shots (about $0.36 beyond the free 10,000, one day under the cap), or 21,900 (about
-  $0.13) with `--no-two-shots`
+- a vertical series of 3–4 Shorts (depending on the voice's speed), cut only at chapter headings
+- about 40,000–43,000 neurons with second shots (about $0.34–0.36 beyond the free 10,000, one day under the cap), or about
+  21,900 (about $0.13) with `--no-two-shots`
 The facts were chosen from well-documented examples, but **fact-check them (section 5) before using this script
 for a real video**.
 
 ```text
 # Five Village Water Hacks That Beat Drought
+# channel: smart_village_boy
 # note: Example script from SCRIPT_GUIDE.md. Copy it, keep the structure, replace the content.
 # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
 
@@ -489,22 +521,23 @@ Which of these would work where you live? Tell us in the comments, and subscribe
 
 ## 7. Self-review checklist
 
-- [ ] First line is a `# Title In Title Case`. The header block has no spoken lines and ends with a blank line.
-- [ ] Only invented characters on `# character:` lines, with the host's line copied exactly.
-- [ ] 8–10 minutes or longer: about 6–8 scenes and 150 words a minute. Each scene is 2–3 sentences and under 60 words.
-- [ ] Each `# HACK` section is 8–15 scenes (under about 2:40), so it fits in one Short.
+- [ ] First line is a `# Title In Title Case`, then `# channel: <id>`. The header block has no spoken lines and ends with a
+      blank line.
+- [ ] Only invented characters on `# character:` lines, with the channel's host line (section 3) copied exactly.
+- [ ] 8–10 minutes or longer at the channel's pace (section 3). Each scene is 2–3 sentences and under 60 words.
+- [ ] Each chapter is 8–15 scenes (under about 2:40), so it fits in one Short.
 - [ ] Every scene has one `# Visuals:` line: one moment, who, what, where and when, a simple pose, no text, logos, montages,
       time-lapses or camera directions.
-- [ ] Chapter headings: `# HOOK` on scene 1, then `# HACK n PLACE` sections of 2 or more scenes, and `# OUTRO`.
+- [ ] Chapter headings: `# HOOK` on scene 1, then the channel's chapters (section 3) of 2 or more scenes each, and `# OUTRO`.
 - [ ] `[video]` on about one scene in 6 to 12, each at the start of a narration line. No other brackets anywhere in the narration.
 - [ ] `# media:` and `# location:` only where needed, each on its own line.
-- [ ] Each hack's first scene names its country or region in the narration.
+- [ ] Each chapter's first scene names its country or region in the narration.
 - [ ] Names, places and descriptions are spelled and worded the same every time.
 - [ ] Hook opens on a problem or surprise, and the open loop pays off at the end. The ending has a recap, a question and
       "subscribe".
 - [ ] Every chapter's first scene names its place and grabs attention on its own (it may open a Short), and every chapter
       ends on a payoff.
-- [ ] Respectful, accurate depiction of every community.
+- [ ] The channel's style (section 3): hook, tone and ending. Respectful, accurate depiction of every community.
 - [ ] Fact-check list done (section 5), with sources, and anything unconfirmed softened or cut.
 - [ ] `make_video.py Scripts\<name>.txt --check` shows **Flags: none** and no notes. Its Shorts list cuts only at chapter
       headings, and its "daily cap" line says "fits" (or the extra days are planned for).

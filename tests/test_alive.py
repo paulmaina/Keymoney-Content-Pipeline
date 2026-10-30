@@ -284,7 +284,7 @@ def test_preview_renders_only_the_picked_scenes_to_working_preview(tmp_path, mon
     mv.main()
     assert seen["texts"] == ["Scene number 2 is here.", "Scene number 4 is here."]
     assert seen["formats"] == ["horizontal"] and seen["parts"] == []
-    assert seen["video"] == seen["label"] == tmp_path / "Exports" / "Story" / "Working" / "preview.mp4"
+    assert seen["video"] == seen["label"] == tmp_path / "Exports" / "smart_village_boy" / "Story" / "Working" / "preview.mp4"
 
 
 def test_a_rainforest_is_not_rain():

@@ -71,6 +71,11 @@ export type Props = {
   captionStyle: CaptionStyle;
   places: Place[];
   part?: Part | null; // a vertical Shorts series: "Part 1 of N" in the intro, "Watch Part N+1" in the outro
+  introClip?: string | null; // the channel's own intro clip (already fitted to the frame), instead of the drawn one
+  outroClip?: string | null; // the channel's own outro clip
+  brand?: Brand | null; // the channel's colours for the drawn intro and outro
 };
+
+export type Brand = {red: string; yellow: string; night: string; nightLight: string};
 
 export type Part = {index: number; count: number};

@@ -164,8 +164,11 @@ def test_no_kaggle_token_falls_back_instead_of_stopping(monkeypatch, capsys):
     assert args.engine == "edge" and "needs KAGGLE_API_TOKEN" in out and "Emma" in out
 
 
-def test_the_project_default_is_the_natural_chatterbox_voice(monkeypatch):
+def test_the_smart_village_boy_voice_is_kokoro_michael(monkeypatch):
+    import channels
     monkeypatch.setattr(mv, "CONFIG_FILE", mv.ROOT / "make_video.toml")
+    monkeypatch.setattr(channels, "CHANNELS_DIR", mv.ROOT / "channels")
     a = mv.parse_args(["s.txt"])
-    assert (a.engine, a.chatterbox_emotion, a.chatterbox_cfg, a.chatterbox_voice) == ("chatterbox", 0.5, 0.5, None)
-    assert a.voice == cb.FALLBACK_VOICE
+    assert a.channel_id == "smart_village_boy" and a.channel == "Smart Village Boy"
+    assert (a.engine, a.voice, a.rate) == ("kokoro", "am_michael", "+20%")
+    assert (a.chatterbox_emotion, a.chatterbox_cfg, a.chatterbox_voice) == (0.5, 0.5, None)  # if switched to chatterbox

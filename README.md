@@ -1,16 +1,17 @@
 # AI Video Editor
 
-Turn a text script into narrated, captioned videos ready for social media. Each video gets its own folder,
-`Exports/<name>/`, named after the script (or `-o`). `Upload/` holds only what goes to YouTube:
+Turn a text script into narrated, captioned videos ready for social media, for one or more [channels](#channels), each with
+its own look, voice and intro and outro. Each video gets its own folder, `Exports/<channel>/<name>/`, named after the script
+(or `-o`), so channels never mix. `Upload/` holds only what goes to YouTube:
 
-| `Exports/<name>/Upload/` | Size | For |
+| `Exports/<channel>/<name>/Upload/` | Size | For |
 |---|---|---|
 | `<name>.mp4` | 1920x1080 | The full video for YouTube |
 | `<name>_Short_Part1.mp4`, `_Short_Part2.mp4`, ... | 1080x1920 | YouTube Shorts (also Reels, TikTok): the same script as a numbered series of parts under 2:50 each ([Shorts series](#vertical-shorts-series)); a script that fits in one is a single `<name>_Short.mp4` |
 | `thumbnail.jpg` | 1280x720 | YouTube thumbnail with 2–4 words of bold text |
 | `youtube.md` | | Titles, descriptions, chapters and tags, with a section per Short ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
 
-`Exports/<name>/Working/` holds everything else: `prompts.json` (image prompts and the character sheet), `media.json` (stock
+`Exports/<channel>/<name>/Working/` holds everything else: `prompts.json` (image prompts and the character sheet), `media.json` (stock
 picks and credits), `image_checks.json` (`--check-images` verdicts), the captions (`<name>.srt` and one per Short), `log.txt`
 (everything the run printed), `kaggle/` (job files of the Kaggle runs) and `render/` (temporary files, removed after the run
 unless `--keep-work`), plus `<name>_DRAFT.mp4` ([drafts](#drafts-and-brainstorming)), `preview.mp4`, `thumbnail_ideas/` and
@@ -25,7 +26,8 @@ follow. Pollinations only makes drafts, brainstorms, and stands in for a scene C
 
 The voice over and captions are generated once and shared by both videos. By default the videos are rendered with
 [Remotion](#motion-with-remotion-default): eased pans and zooms with a subtle 2.5D parallax, crossfades, animated captions,
-place labels, a world map with a pin for each new country, and a short branded intro and outro. Everything runs locally and free.
+place labels, a world map with a pin for each new country, and the channel's intro and outro (generated, or your own clips).
+Everything runs locally and free.
 
 ## Setup
 1. Install **FFmpeg** and make sure `ffmpeg` and `ffprobe` are on your PATH
@@ -35,7 +37,7 @@ place labels, a world map with a pin for each new country, and a short branded i
    python -m venv .venv
    .venv\Scripts\python -m pip install -r requirements.txt
    ```
-3. Optional, for the offline voice (`--engine kokoro`): download the Kokoro model (~340 MB, once):
+3. For the Kokoro voice (Smart Village Boy's voice, and `--engine kokoro`): download the Kokoro model (~340 MB, once):
    ```
    .venv\Scripts\python download_models.py
    ```
@@ -51,8 +53,9 @@ place labels, a world map with a pin for each new country, and a short branded i
 For hand editing, [Shotcut](https://shotcut.org) (`winget install Meltytech.Shotcut`) works well with the exported MP4s and `.srt`.
 
 ## Writing a script
-[SCRIPT_GUIDE.md](SCRIPT_GUIDE.md) is the full standard for writing scripts (format, writing rules, channel style, length and
-cost, a fact-check checklist), with `Scripts/TEMPLATE.txt` as a worked example that a test keeps passing `--check`.
+[SCRIPT_GUIDE.md](SCRIPT_GUIDE.md) is the full standard for writing scripts: the general format and writing rules, a short
+style section per channel, length and cost, and a fact-check checklist, with `Scripts/TEMPLATE.txt` as a worked example that a
+test keeps passing `--check`.
 
 Save a `.txt` file in `Scripts/`. The recommended format is **one paragraph per scene**, separated by blank lines,
 with 2–3 spoken sentences each and 15–20 paragraphs in all:
@@ -74,6 +77,8 @@ Grandpa Kofi watches from the riverbank. He smiles and waves his stick.
   Missing files are reported before any audio is made.
 - **Tags are never spoken or captioned.** They're recognised only at the start of a line, in any upper or lower case, and both can be combined:
   `[video] [visual: x.png] Text`. A bracket anywhere else stays in the narration, and `--check` flags it.
+- **`# channel: <id>`** in the header picks the [channel](#channels) (its settings, intro and outro, and `Exports/<id>/`).
+  It wins over `--channel` and `default-channel`.
 - **`# character: Name = description`** lines (also `Name: description` or `Name - description`) declare a character sheet
   for consistent AI images (see [Character consistency](#character-consistency)). They aren't spoken.
 - **`#` description lines** inside a paragraph, labelled `Visuals:`, `Visual:`, `Shot:` or `Description:`
@@ -90,8 +95,8 @@ Grandpa Kofi watches from the riverbank. He smiles and waves his stick.
 ```
 .venv\Scripts\python make_video.py Scripts\my_video.txt --check
 ```
-`--check` reports scene count, words and estimated seconds per scene (from the voice engine and `--rate`), which scenes get an AI
-image, a stronger move (`[video]`) or your own file, and every `#` comment line it skipped. It flags:
+`--check` reports scene count, words and estimated seconds per scene (from the voice engine and `--rate`), the channel, each
+intro and outro (your clip with its length, or the generated one), which scenes get an AI image, a stronger move (`[video]`) or your own file, and every `#` comment line it skipped. It flags:
 - a `# character:` line without `=`, `:` or ` - ` between name and description (it would be skipped as a comment);
 - paragraphs over 60 words, or with more than 3 sentences once they pass 40 words;
 - missing `[visual:]` files;
@@ -109,28 +114,78 @@ It uses no network, audio or FFmpeg, and changes nothing. Add the options you'll
 see their cost; a draft costs only its prompts.
 
 ### Your defaults (`make_video.toml`)
-Options you always use go in `make_video.toml` in the project folder, written like the command-line option without the dashes:
+Options you always use go in `make_video.toml` in the project folder, written like the command-line option without the dashes.
+Each channel's look and sound live in its own file ([Channels](#channels)), which wins over this one:
 ```toml
+default-channel = "smart_village_boy"   # unless the script has "# channel: <id>" or you pass --channel
 [defaults]
 generate-visuals = true     # stock or AI images for every scene without [visual:] (also the built-in default)
 check-images = true         # vision check for anatomy errors and stray text (~40 neurons an image; built-in default)
 max-daily-neurons = 60000   # daily Cloudflare cap, Nairobi time (~$0.55 a day beyond the free 10,000); 0 = no cap
 draft-images = false        # true = every run is a quick Pollinations draft (--draft)
 media = "mixed"             # stock where it matches well, else AI images
-style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
-engine = "chatterbox"       # the "natural" Chatterbox voice on Kaggle (see below); "edge" for Emma without Kaggle
-chatterbox-emotion = 0.5
-chatterbox-cfg = 0.5
-voice = "en-US-EmmaMultilingualNeural"   # the Edge voice, also the fallback if Chatterbox can't run
-rate = "+5%"
 ```
-Alternatively, put `VIDEO_STYLE=...` in `.env`, which overrides `style` in the file. Options typed on the command line always win
-(`--style ""` turns the style off for one run). On/off options set in the file have a `--no-` form for one run:
+`VIDEO_STYLE=...` in `.env` overrides `style` in this file, but not a channel's style. Options typed on the command line always
+win over both files (`--style ""` turns the style off for one run). On/off options set in the file have a `--no-` form for one run:
 `--no-generate-visuals`, `--no-check-images`, `--no-draft`. Unknown keys are reported, not silently ignored (an old
 `upscale` or `image-provider` line just gets that note). Upscaling has no switch: every final render does it.
 With these defaults, the whole command is `.venv\Scripts\python make_video.py Scripts\my_video.txt`.
 [Commands.txt](Commands.txt) is a plain-text runbook of setup, the workflow, every command and every default with the setting
-that changes it, limits and troubleshooting.
+that changes it, limits, troubleshooting, and a step-by-step guide to new channels and branding clips.
+
+## Channels
+Every video belongs to a channel. A channel is a settings file, `channels/<id>.toml`, and a branding folder,
+`channels/<id>/branding/`, and its videos go to `Exports/<id>/<name>/`. Smart Village Boy (`smart_village_boy`) is the default.
+
+**The settings file** holds the channel's name and tagline (in the generated intro), the intro and outro colours, the image
+`style`, the voice (`engine`, `voice`, the Chatterbox settings), the speed (`rate`), `caption-style`, `music` and
+`music-volume`, and `youtube-style` (added to the YouTube writer's instructions). Any other make_video option can go there too.
+Settings layer as `make_video.toml` < the channel's file < the command line. Smart Village Boy's:
+```toml
+name = "Smart Village Boy"
+tagline = "Clever ideas from the world's villages"
+style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
+engine = "kokoro"
+voice = "am_michael"
+rate = "+20%"              # Kokoro speed 1.2; every engine follows rate
+caption-style = "auto"
+music-volume = 0.2         # music = "..." when there is one
+youtube-style = "warm, curious and respectful: celebrate the villagers' ingenuity and the place, never pity or hype"
+
+[colors]                   # keep this table last: in TOML every line after it belongs to it
+accent = "#FFD23F"
+button = "#E63946"
+background = "#0E2A3B"
+background-light = "#1C4A63"
+```
+
+**Choosing the channel:** a `# channel: <id>` line in the script's header wins; else `--channel <id>` (the display name
+works too); else `default-channel` in `make_video.toml`. An unknown channel stops the run with the list of channels.
+
+**Your own intro and outro clips.** Put any of these in `channels/<id>/branding/` and it replaces the generated one; any that's
+missing stays generated (the folder's `README.txt` has the details):
+
+| File | Size | Suggested | Used for |
+|---|---|---|---|
+| `intro_horizontal.mp4` | 1920x1080 | 2–4 s | the full video's start |
+| `intro_vertical.mp4` | 1080x1920 | 2–4 s | every Short's start (the "PART 1 OF N" badge is drawn over it) |
+| `outro_horizontal.mp4` | 1920x1080 | 3–5 s | the full video's end |
+| `outro_vertical.mp4` | 1080x1920 | 3–5 s | a single Short's end, and the last part's |
+| `outro_next_part_vertical.mp4` | 1080x1920 | 3–5 s | optional: every other part's end, instead of "Watch Part N" |
+
+MP4 at 30 fps is best; other sizes and frame rates are resized and padded with black bars (never stretched or cropped) and
+converted to 30 fps by FFmpeg before Remotion plays them, and clips under 1 s are ignored. The intro and outro crossfade with the
+first and last scene as the generated ones do. Each clip keeps its own sound; music fades in after your intro and ducks under
+the voice and your outro's sound. The clips' real lengths drive the timeline, the YouTube chapters, the Shorts captions and the
+Shorts split (each part still stays under 2:50), and `--check` lists every intro and outro with its length. Files ending in
+`_TEMPLATE.mp4` are never used: they're the generated intro and outro exported for you to edit (silent), made by:
+```
+.venv\Scripts\python channels.py templates smart_village_boy   # README.txt and the *_TEMPLATE.mp4 files again
+.venv\Scripts\python channels.py new "Travel Diaries"          # a new channel: its file, branding folder, README and templates
+.venv\Scripts\python channels.py list                          # the channels and their own clips
+```
+Only the Remotion renderer adds intros and outros; `--no-branding` and `--renderer ffmpeg` leave them out. Give each new channel a
+style section in SCRIPT_GUIDE.md too.
 
 ## Making the video
 ```
@@ -152,11 +207,12 @@ that changes it, limits and troubleshooting.
 | `--thumbnail-ideas 4` | Brainstorm: 4 thumbnail options from Pollinations in `Working/thumbnail_ideas/`, then stop |
 | `--style-test "a \| b"` | Brainstorm: one scene (`--style-test-scene N`) drawn in each style by Pollinations, in `Working/style_tests/`, then stop |
 | `--caption-style bold` | Remotion captions: `bold`, `clean` or `minimal` for both formats (default `auto`: bold vertical, clean horizontal) |
-| `-o Promo` | The video's folder and name (default: the script's name): `Exports\Promo\Upload\Promo.mp4` and so on. A path (`-o D:\Videos\Promo`) is used as the folder |
-| `--engine kokoro` | Offline voice instead of Microsoft's online voices |
+| `-o Promo` | The video's folder and name (default: the script's name): `Exports\<channel>\Promo\Upload\Promo.mp4` and so on. A path (`-o D:\Videos\Promo`) is used as the folder |
+| `--channel travel_diaries` | The [channel](#channels) for this run, unless the script has a `# channel:` line (default: `default-channel` in `make_video.toml`) |
+| `--engine kokoro` | Offline Kokoro voice (Smart Village Boy's, with `voice = "am_michael"`) |
 | `--engine chatterbox` | Chatterbox voice made on a free Kaggle GPU (see [Chatterbox voice](#chatterbox-voice-on-kaggle---engine-chatterbox)); `--chatterbox-voice`, `--chatterbox-emotion`, `--chatterbox-cfg` |
 | `--voice en-US-GuyNeural` | Choose a voice (defaults: `en-US-AriaNeural` online, `af_heart` offline) |
-| `--rate +10%` | Speak faster (or `-10%` slower) |
+| `--rate +10%` | Speak faster (or `-10%` slower), for every engine: Edge's own rate, Kokoro's speed (`+15%` = 1.15), a pitch-kept tempo change for Chatterbox |
 | `--music "Raw Footage\song.mp3"` | Background music. It drops while the voice speaks and fades out over the last 2 seconds |
 | `--music-volume 0.2` | Music level between sentences |
 | `--font path\to\font.ttf` | Font for captions and title cards (default: bundled Noto Sans Bold) |
@@ -179,7 +235,6 @@ that changes it, limits and troubleshooting.
 | `--caption-words 4` | Fewer words per caption line |
 | `--no-metadata` | Don't write `Upload/youtube.md` and `Upload/thumbnail.jpg` after rendering |
 | `--metadata-model @cf/...` | Workers AI model for the YouTube titles, description and tags (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, ~65 neurons) |
-| `--channel "My Channel"` | Channel name used in the YouTube metadata (default Smart Village Boy) |
 
 `--vertical` still works as a deprecated alias for `--format vertical`. Every final render also sharpens its images on Kaggle
 ([Upscaling](#upscaling-on-kaggle-every-final-render)); there's no option for it.
@@ -191,7 +246,8 @@ Examples:
 ```
 
 Voices: run `.venv\Scripts\edge-tts --list-voices` for the online ones (e.g. `en-US-AndrewNeural`, `en-GB-SoniaNeural`).
-Offline Kokoro voices include `af_heart`, `af_bella`, `am_michael`, `bf_emma` and `bm_george`.
+Offline Kokoro voices include `af_heart`, `af_bella`, `am_michael`, `bf_emma` and `bm_george`. `Exports/voice_samples/` has
+`kokoro-am_michael-speed1.00.wav`, `1.10`, `1.15` and `1.20` to compare speeds (`rate = "+0%"`, `"+10%"`, `"+15%"`, `"+20%"`).
 
 ### Motion with Remotion (default)
 `remotion_render.py` plans every frame in Python and hands it to the small React project in `remotion/`, which Remotion renders in
@@ -204,7 +260,7 @@ headless Chrome on your PC. The voice and music are then mixed by FFmpeg exactly
   image has a clear subject standing in front of a backdrop (in Script2: the market vendor, the two farmers, the globe's pins), not on
   walls, aerial views or close-ups, where it would wobble. Masks are cached next to the images.
 - **Crossfades** between scenes, centred on the moment the narration moves on.
-- **Captions** have their own style per format (`--caption-style`, or `caption-style` in `make_video.toml`):
+- **Captions** have their own style per format (`--caption-style`, or `caption-style` in the channel's file):
 
   | Style | Look | Default for |
   |---|---|---|
@@ -226,7 +282,8 @@ headless Chrome on your PC. The voice and music are then mixed by FFmpeg exactly
   shrinking to fit above the captions with its label inside it, and the captions take their lowest slot while it shows. Small faces in a background
   crowd may still be covered; if there's no room under the face for a useful map, it stays at the top.
 - **Branding**: a 2-second intro (rising sun, channel name, tagline) and a 3.5-second "Thanks for watching / Subscribe" outro,
-  in the channel's red, yellow and night blue. `--no-branding` leaves them out. YouTube chapters account for the intro.
+  in the channel's colours, or the channel's own clips ([Channels](#channels)). `--no-branding` leaves them out. YouTube
+  chapters account for the intro.
 
 **Render time.** Before rendering, the run prints an estimate from the speed it measured last time on your PC (`--check` shows it
 too). On an Intel i7-1355U laptop with integrated graphics and 16 GB RAM, Script2 (2:37, 19 scenes) took 286 s to render
@@ -236,7 +293,7 @@ horizontally and 336 s vertically, about 15 frames a second with 6 in parallel. 
 ### Stills that feel alive
 Every setting below is on by default and has a key in `make_video.toml`. Compare quickly with
 `--preview-scenes "1,6,8,14"`, a draft of only those scenes (horizontal, or `--format vertical`, Pollinations pictures) in
-`Exports/<name>/Working/preview.mp4`.
+`Exports/<channel>/<name>/Working/preview.mp4`.
 - **Depth parallax** (`depth = "strong"`): on every picture where the depth model finds a clear foreground (6–60% of the frame,
   well in front of the rest), the subject grows and drifts over the backdrop, as if the camera moved through the scene. The part
   of the backdrop behind the subject is filled in from its surroundings (OpenCV inpainting, cached next to the image as
@@ -393,7 +450,7 @@ run a draft (`--no-draft` for one final run). `--preview-scenes "1,6,8"` is alwa
   The final render still makes its own `Upload/thumbnail.jpg`.
 - `--style-test "watercolour | 3D animated film | photorealistic documentary photography"`: one scene (the first without a
   `[visual:]` file, or `--style-test-scene 5`) drawn once in each style, with a prompt written for each, into
-  `Working/style_tests/scene5_1_watercolour.jpg` and so on. Put the one you like in `make_video.toml` as `style = "..."`.
+  `Working/style_tests/scene5_1_watercolour.jpg` and so on. Put the one you like in the channel's file as `style = "..."`.
 
 ### Image models
 Workers AI's text-to-image models (pricing page checked October 2026). Costs are for one 1536x864 image, from the published
@@ -475,7 +532,7 @@ This writes the prompts and stops, using only the text model. Check how people, 
 single still image can't show, such as "time-lapse", "fast cuts" or animations, and anything that would render as text. Then run
 the normal command with the same `-o`.
 
-Prompts are saved to `Exports/<name>/Working/prompts.json`:
+Prompts are saved to `Exports/<channel>/<name>/Working/prompts.json`:
 ```json
 {"style": "photorealistic ...", "scenes": [{"scene": 4, "narration": "In northern Nigeria, heat can...", "prompt": "Medium shot, 50mm lens..."}]}
 ```
@@ -500,7 +557,7 @@ The sheet is saved under `"characters"` in `Working/prompts.json`; edit it there
 so keep descriptions short, concrete and identical across scenes: "yellow dress, red sandals", not "brightly dressed".
 
 ### Style
-The style (from `--style`, `make_video.toml` or `VIDEO_STYLE`) is added to every image prompt, and it's also given to the prompt writer.
+The style (from `--style`, the channel's file, `make_video.toml` or `VIDEO_STYLE`) is added to every image prompt, and it's also given to the prompt writer.
 The default is photorealistic documentary photography, so prompts are written as real photographs (shot type, lens, natural light,
 real textures); with an animated style they're written for animation instead.
 
@@ -529,10 +586,10 @@ runner as the upscaling), the audio comes back, and the render finishes locally 
 - **Cache and resume:** each line is cached in `generated/voice/`, keyed by its text and every setting that changes the sound (the
   reference clip's contents, emotion, cfg, model version), so a rerun only sends new or edited lines. If a run stops part-way, the
   lines it finished are kept and the next run sends only the rest.
-- **Default:** `make_video.toml` sets `engine = "chatterbox"` with the "natural" settings (emotion 0.5, cfg 0.5), so every render
-  uses it. `--engine edge` makes one render with Emma without Kaggle.
+- **Using it:** set `engine = "chatterbox"` in a channel's file (with the "natural" settings, emotion 0.5 and cfg 0.5), or
+  `--engine chatterbox` for one render. Smart Village Boy uses Kokoro now; its file keeps the Chatterbox settings for a switch back.
 - **Fallback:** if Kaggle fails, `KAGGLE_API_TOKEN` is missing or any line is missing, the whole video uses the Edge voice (Emma,
-  or your toml voice), so a video never mixes two voices.
+  or the channel's voice when it's an Edge voice), so a video never mixes two voices.
 - Chatterbox adds Resemble's imperceptible Perth watermark to its audio. The YouTube notes already say the narration is an AI voice.
 - **Samples:** `.venv\Scripts\python chatterbox_tts.py` speaks one line at three settings (natural 0.5/0.5, calm 0.35/0.6,
   lively 0.8/0.3) in one Kaggle run, plus Edge Emma, into `Exports/voice_samples/`. Add `--voice <clip>` to try a reference voice.
@@ -612,7 +669,8 @@ the sharper images are used in the render (and the thumbnail). Images are enlarg
 .venv\Scripts\python -m pip install pytest
 .venv\Scripts\python -m pytest
 ```
-The tests cover script parsing (including `[video]`/`[visual:]` tags and character lines), `--check`, `make_video.toml` defaults, the character sheet
+The tests cover script parsing (including `[video]`/`[visual:]` tags and character lines), `--check`, `make_video.toml` defaults, channel
+profiles (choosing the channel, the settings layers, per-channel outputs, branding clips, their padding, sound and lengths, templates), the character sheet
 (names swapped for roles, only the scene's own characters), caption timing and alignment, AI image providers, models, sizes and their fallbacks,
 the Kaggle runner, upscaling and `--engine chatterbox` (one batch, the caches, resuming, the fallbacks), the daily cap, drafts and
 brainstorming, stock media

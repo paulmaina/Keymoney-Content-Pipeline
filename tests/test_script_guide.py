@@ -24,7 +24,8 @@ def check(tmp_path, *options):
 def test_template_passes_check_with_no_flags_or_notes(tmp_path):
     a = check(tmp_path)
     assert a["flags"] == [] and a["notes"] == []
-    assert [n for n, _ in a["comments"]] == [1, 2]  # the title and the note; character, media, location lines are used
+    assert [n for n, _ in a["comments"]] == [1, 3]  # the title and the note; channel, character, media and location
+    # lines are used
 
 
 def test_template_follows_the_guide_s_standard(tmp_path):

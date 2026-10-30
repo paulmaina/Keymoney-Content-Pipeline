@@ -1,17 +1,17 @@
-"""Where a video's files go: one folder per video, split into what you upload and everything else.
+"""Where a video's files go: one folder per video under its channel, split into what you upload and everything else.
 
-  Exports/<name>/Upload/    only what goes to YouTube
+  Exports/<channel>/<name>/Upload/    only what goes to YouTube
       <name>.mp4                  the full horizontal video
       <name>_Short_Part1.mp4 ...  the vertical Shorts series (<name>_Short.mp4 when it fits in one)
       thumbnail.jpg
       youtube.md                  titles, descriptions, chapters and tags, with a section per Short
-  Exports/<name>/Working/   everything else
+  Exports/<channel>/<name>/Working/   everything else
       prompts.json, media.json, image_checks.json, <name>.srt and each Short's .srt, log.txt,
       kaggle/ (job files of the Kaggle runs), render/ (temporary files, removed unless --keep-work),
       <name>_DRAFT.mp4 (--draft), preview.mp4 (--preview-scenes), thumbnail_ideas/ and style_tests/ (brainstorming)
 
-<name> is the script's file name, or -o: a plain name ("Promo") goes under Exports/, a path ("D:\\Videos\\Promo") is used
-as the folder. The shared caches (generated/ images, upscaled images, stock media and voice lines) stay where they are,
+<channel> is the channel's id (channels/<channel>.toml), so channels never mix. <name> is the script's file name, or -o:
+a plain name ("Promo") goes under Exports/<channel>/, a path ("D:\\Videos\\Promo") is used as the folder. The shared caches (generated/ images, upscaled images, stock media and voice lines) stay where they are,
 so a new folder never regenerates anything.
 """
 import sys
@@ -29,11 +29,12 @@ class Outputs:
         self.working = self.folder / "Working"
 
     @classmethod
-    def for_script(cls, output, script):
+    def for_script(cls, output, script, channel=None):
+        base = EXPORTS / channel if channel else EXPORTS
         if not output:
-            return cls(EXPORTS / Path(script).stem)
+            return cls(base / Path(script).stem)
         output = Path(output)
-        return cls(output if output.parent != Path(".") or output.is_absolute() else EXPORTS / output)
+        return cls(output if output.parent != Path(".") or output.is_absolute() else base / output)
 
     def make(self):
         self.upload.mkdir(parents=True, exist_ok=True)

@@ -62,12 +62,12 @@ def run(monkeypatch, *argv):
 def test_a_draft_goes_to_working_with_a_label_and_skips_the_final_steps(story, tmp_path, monkeypatch, capsys):
     p, seen = story
     run(monkeypatch, p, "--draft", "--engine", "edge", "--no-metadata")
-    working = tmp_path / "Exports" / "Story" / "Working"
+    working = tmp_path / "Exports" / "smart_village_boy" / "Story" / "Working"
     assert seen["video"] == seen["label"] == working / "Story_DRAFT.mp4"
     assert seen["formats"] == ["horizontal"] and seen["parts"] == []  # one format, no Shorts
     assert seen["providers"][0].mode == "draft" and seen["check"] is False
     assert "upscaled" not in seen and "media_json" not in seen  # no Kaggle; the final render's records untouched
-    assert not any((tmp_path / "Exports" / "Story" / "Upload").iterdir())
+    assert not any((tmp_path / "Exports" / "smart_village_boy" / "Story" / "Upload").iterdir())
     out = capsys.readouterr().out
     assert f"DRAFT render: {working}" in out and "FINAL render" not in out and "aren't Cloudflare's work" not in out
 
@@ -76,14 +76,14 @@ def test_the_plain_command_is_a_final_render(story, tmp_path, monkeypatch, capsy
     p, seen = story
     monkeypatch.setattr(mv, "make_captions", lambda *a, **k: (None, None))
     run(monkeypatch, p, "--engine", "edge", "--no-metadata", "--format", "horizontal")
-    upload = tmp_path / "Exports" / "Story" / "Upload"
+    upload = tmp_path / "Exports" / "smart_village_boy" / "Story" / "Upload"
     assert seen["providers"][0].mode == "final" and seen["providers"][0].cap == av.MAX_DAILY_NEURONS
     assert seen["check"] is True and seen["upscaled"] and seen["media_json"] and "label" not in seen
     assert seen["video"] == upload / "Story.mp4"
     out = capsys.readouterr().out
     assert out.rstrip().endswith(f"FINAL render: ready to upload from {upload}")
     assert "scene 2: Pollinations backup image" in out and '--redo-scenes "2"' in out
-    log = (tmp_path / "Exports" / "Story" / "Working" / "log.txt").read_text(encoding="utf-8")
+    log = (tmp_path / "Exports" / "smart_village_boy" / "Story" / "Working" / "log.txt").read_text(encoding="utf-8")
     assert '--redo-scenes "2"' in log and "FINAL render" in log  # also in the log
 
 
@@ -171,7 +171,7 @@ def test_brainstorming_stops_before_any_voice_or_video(pollinations, tmp_path, m
     monkeypatch.setattr(mv, "check_ffmpeg", lambda: None)
     monkeypatch.setattr(mv, "produce", lambda *a, **k: pytest.fail("rendered"))
     run(monkeypatch, p, "--thumbnail-ideas", "2", "--style-test", "ink sketch")
-    working = tmp_path / "Exports" / "s" / "Working"
+    working = tmp_path / "Exports" / "smart_village_boy" / "s" / "Working"
     assert len(list((working / "thumbnail_ideas").iterdir())) == 2
     assert [f.name for f in (working / "style_tests").iterdir()] == ["scene1_1_ink_sketch.jpg"]
 
