@@ -1,39 +1,60 @@
-# character: Smart Village Boy = twelve year old boy, short black hair, bright smile, red cap, yellow T-shirt
-# character: Alfredo Moser = fifty year old man, grey hair, mechanic's blue overalls
-# note: I used the Smart Village Boy script from the doc, since the script itself wasn't pasted in.
+# character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
+# character: Sonam Wangchuk = Ladakhi engineer in his late fifties, short greying hair, weathered face, wearing a traditional maroon Ladakhi wool robe tied with a sash
+# note: No topic was pasted, so this script uses the five village hacks story from Script 1.
 
-[video] At sunrise on a dusty Kenyan hilltop, Smart Village Boy, a twelve year old boy with short black hair and a bright smile, in a red cap and a yellow T-shirt, runs up and spins a giant globe. There is no electricity here, no fridge and no running water. Yet villagers around the world keep food cold, light their homes and pull water from the air.
+# Visuals: Smart Village Boy running up a dusty Kenyan hilltop at sunrise, reaching out to spin a large wooden globe on a stand, with mud houses and acacia trees behind him.
+[video] No electricity. No fridge. No running water. Yet villagers around the world keep food cold, light their homes and pull water from the air.
 
-On the same hilltop at sunrise, Smart Village Boy, a twelve year old boy with short black hair and a bright smile, in a red cap and a yellow T-shirt, points to five glowing pins on the globe. Welcome to Smart Village Boy, where we visit the world's villages for their cleverest ideas. Stay to the end, because hack number five is alive.
+# Visuals: Smart Village Boy standing beside the wooden globe on the Kenyan hilltop at sunrise, pointing at one of five small red pins stuck into it.
+Welcome to Smart Village Boy, where we visit the world's villages for their cleverest ideas. Stay to the end, because hack number five is alive.
 
-In a busy market in northern Nigeria at midday, a vendor watches her tomatoes wilt under the burning sun. Here, the heat can spoil vegetables in just a few days.
+# Visuals: A woman vendor in a colourful headwrap at a busy open-air market in northern Nigeria at midday, looking down at a pile of wilting tomatoes under harsh sunlight.
+In northern Nigeria, the heat can spoil vegetables in just a few days. For farmers and traders, that means lost food and lost money.
 
-In a shaded schoolyard in northern Nigeria that afternoon, Mohammed Bah Abba, a teacher in a white kaftan and cap, sets one clay pot inside a bigger one. He fills the gap with wet sand and lays a damp cloth over the top.
+# Visuals: Mohammed Bah Abba kneeling in a shaded schoolyard in northern Nigeria in the afternoon, lowering a small clay pot into a larger clay pot.
+A teacher named Mohammed Bah Abba popularised an old idea. He set one clay pot inside a bigger one.
 
-[video] In the same schoolyard as evening falls, soft vapour rises from the outer pot as the water evaporates. The heat drains away and the inner pot stays cool. Tomatoes that once rotted in days now stay fresh for weeks.
+# Visuals: Close view of hands pouring wet sand into the gap between two clay pots in the same Nigerian schoolyard in the afternoon, with a damp cloth folded beside them.
+He filled the gap with wet sand and covered the top with a damp cloth. People call it the zeer, or the pot-in-pot cooler.
 
-In a dark tin roofed home in Brazil on a bright morning, Alfredo Moser, a fifty year old man with grey hair, in a mechanic's blue overalls, fills a plastic bottle with water and a splash of bleach. Blackouts are common here, and the rooms stay gloomy even by day.
+# Visuals: The clay pot cooler resting in the Nigerian schoolyard at dusk, with water droplets beading on the outer pot and a hand lifting the cloth to reveal bright red, fresh tomatoes inside.
+[video] As the water evaporates, it pulls the heat away and the inner pot stays cool. Tomatoes that once rotted in days can now last for weeks.
 
-[video] In the same Brazilian home that morning, Alfredo Moser, a fifty year old man with grey hair, in a mechanic's blue overalls, pushes the bottle through a hole in the roof. Sunlight hits the water and the whole room lights up, almost as bright as a light bulb.
+# Visuals: Alfredo Moser in a dim tin-roofed home in Brazil on a bright morning, filling a clear plastic bottle with water from a jug.
+In Brazil, a mechanic named Alfredo Moser was tired of blackouts and dark rooms. His fix began with a plastic bottle, some water and a splash of bleach.
 
-Over crowded rooftops in the Philippines at noon, thousands of bottles glint in the sun. A movement called Liter of Light carried his idea to hundreds of thousands of homes.
+# Visuals: Alfredo Moser standing on a ladder inside the same Brazilian home that morning, pushing the water bottle up through a hole in the tin roof, with a bright beam of sunlight filling the room below.
+[video] He pushed the bottle through a hole in the roof. Sunlight hit the water and spread through the room, almost as bright as a light bulb.
 
-On the dry coastal hills of Chile's Atacama Desert at dawn, thick sea fog rolls in from the Pacific. This is one of the driest places on Earth, yet the air itself is full of water.
+# Visuals: Rows of tin rooftops in a crowded neighbourhood in the Philippines at noon, with dozens of plastic bottles set into the roofs and glinting in the sun.
+A movement called Liter of Light carried his idea to the Philippines and beyond. Hundreds of thousands of homes now have free daytime light.
 
-On the same Atacama hillside that morning, villagers in wool ponchos stretch a huge mesh net between two tall poles. Tiny droplets of fog cling to the mesh and slowly grow fatter.
+# Visuals: Thick white sea fog rolling over dry brown coastal hills in Chile's Atacama Desert at dawn, with the Pacific Ocean faint in the distance.
+Chile's Atacama is one of the driest deserts on Earth. Yet every morning, thick sea fog rolls in from the Pacific.
 
-At the foot of the Atacama net later that morning, water trickles into a gutter and fills a tank. Some nets collect hundreds of litres a day, enough to grow vegetables in the desert.
+# Visuals: Two villagers in wool ponchos stretching a huge black mesh net between two tall wooden poles on an Atacama hillside in the early morning fog.
+So villagers stretch huge mesh nets across the hills. Tiny drops of fog cling to the mesh and slowly grow bigger.
 
-In a frozen Himalayan valley in Ladakh, India, on a winter afternoon, farmers stare at a dry irrigation channel. Spring is when their crops need water most, and that is exactly when it runs short.
+# Visuals: Water dripping from the bottom of a fog net into a plastic gutter that feeds a blue water tank on the Atacama hillside in the late morning, with a small green vegetable patch nearby.
+The drops trickle down into gutters and tanks. Some nets collect hundreds of litres a day, enough to grow vegetables in the desert.
 
-[video] In the same Ladakh valley on a freezing winter night, Sonam Wangchuk, an engineer in a brown woollen jacket and cap, opens a pipe. Water shoots upward into the icy air and freezes into a towering cone of ice. He calls it an ice stupa.
+# Visuals: Two farmers in thick woollen clothes standing beside a dry stone irrigation channel in a frozen Himalayan valley in Ladakh, India, on a winter afternoon, with snowy mountains behind.
+High in the Himalayas, the farmers of Ladakh face a cruel problem. Spring is when their crops need water most, and that is exactly when it runs short.
 
-In the Ladakh valley on a sunny spring morning, the ice stupa melts slowly. Its cone shape keeps most of it out of the sun, so water reaches the barley fields just when they need it.
+# Visuals: Sonam Wangchuk standing in the snow in a Ladakh valley on a freezing winter night, opening a valve on a pipe as a fountain of water sprays upward and freezes onto a tall cone of ice.
+[video] Engineer Sonam Wangchuk piped meltwater downhill and sprayed it into the freezing air. It froze into a towering cone of ice called an ice stupa.
 
-In a misty rainforest in Meghalaya, India, early in the morning, Khasi villagers guide the roots of a rubber fig tree through a hollow betel nut trunk across a river. They are building a bridge that grows.
+# Visuals: A tall ice cone melting slowly under clear blue sky in the Ladakh valley on a sunny spring morning, with a stream of water running from its base into green barley fields.
+The cone shape keeps most of the ice out of the sun, so it melts slowly. The water reaches the barley fields just when the farmers need it.
 
-[video] In the same Meghalaya rainforest years later, on a golden afternoon, thick tangled roots span the river and a line of villagers walks across a double decker bridge. Unlike wood or steel, this bridge grows stronger as it ages.
+# Visuals: Khasi villagers on a riverbank in a misty Meghalaya rainforest in India in the early morning, guiding thin rubber fig roots through a hollow betel nut trunk laid across the river.
+And now the hack that is alive. In the rainforests of Meghalaya, Khasi villagers guide the roots of rubber fig trees across rivers.
 
-Back on the Kenyan hilltop at sunset, Smart Village Boy, a twelve year old boy with short black hair and a bright smile, in a red cap and a yellow T-shirt, looks at the five glowing pins. Five villages, five problems and five brilliant answers, and not one of them needed a big budget.
+# Visuals: A line of villagers walking across a thick, tangled double-decker bridge made of living tree roots over a rocky river in the Meghalaya rainforest on a golden afternoon.
+[video] Over many years, the roots thicken and weave into a bridge that can carry dozens of people. Unlike wood or steel, it grows stronger as it ages.
 
-On the same hilltop as the stars come out, Smart Village Boy, a twelve year old boy with short black hair and a bright smile, in a red cap and a yellow T-shirt, waves at the camera. Which hack would you use where you live? Share one from your own village in the comments, and subscribe for more.
+# Visuals: Smart Village Boy sitting beside the wooden globe on the Kenyan hilltop at sunset, smiling as he looks at the five red pins.
+Five villages, five problems and five brilliant answers. Not one of them needed a big budget.
+
+# Visuals: Smart Village Boy waving towards the viewer on the Kenyan hilltop at dusk, with the first stars appearing above the village.
+Which hack would you use where you live? Share one from your own village in the comments, and subscribe for more.

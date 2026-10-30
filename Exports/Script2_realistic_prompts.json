@@ -1,0 +1,124 @@
+{
+  "image_model": "@cf/black-forest-labs/flux-2-klein-4b",
+  "style": "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures",
+  "characters": {
+    "Smart Village Boy": "Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile",
+    "Sonam Wangchuk": "Ladakhi engineer in his late fifties, short greying hair, weathered face, wearing a traditional maroon Ladakhi wool robe tied with a sash"
+  },
+  "scenes": [
+    {
+      "scene": 1,
+      "description": "Visuals: Smart Village Boy running up a dusty Kenyan hilltop at sunrise, reaching out to spin a large wooden globe on a stand, with mud houses and acacia trees behind him.",
+      "narration": "No electricity. No fridge. No running water. Yet villagers around the world keep food cold, light their homes and pull water from the air.",
+      "prompt": "Wide shot, 50mm lens, warm sunrise light, Smart Village Boy running up a dusty hill, both hands reaching out to spin a large wooden globe, mud houses and acacia trees in the background.",
+      "image_provider": "cloudflare",
+      "quality": {
+        "horizontal": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        },
+        "vertical": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        }
+      }
+    },
+    {
+      "scene": 2,
+      "description": "Visuals: Smart Village Boy standing beside the wooden globe on the Kenyan hilltop at sunrise, pointing at one of five small red pins stuck into it.",
+      "narration": "Welcome to Smart Village Boy, where we visit the world's villages for their cleverest ideas. Stay to the end, because hack number five is alive.",
+      "prompt": "Medium shot, 50mm lens, warm sunrise light, Smart Village Boy standing beside a large wooden globe, one hand resting on the globe, the other hand holding a small red pin, mud houses and acacia trees in the background.",
+      "image_provider": "cloudflare",
+      "quality": {
+        "horizontal": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        },
+        "vertical": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        }
+      }
+    },
+    {
+      "scene": 13,
+      "description": "Visuals: Two farmers in thick woollen clothes standing beside a dry stone irrigation channel in a frozen Himalayan valley in Ladakh, India, on a winter afternoon, with snowy mountains behind.",
+      "narration": "High in the Himalayas, the farmers of Ladakh face a cruel problem. Spring is when their crops need water most, and that is exactly when it runs short.",
+      "prompt": "Medium shot, 50mm lens, cold winter afternoon light, two Ladakhi farmers in thick woollen clothes standing beside a dry stone irrigation channel, one farmer's hands resting on the stone wall, the other's hands at their sides, snowy mountains in the background.",
+      "image_provider": "cloudflare",
+      "quality": {
+        "horizontal": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        },
+        "vertical": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        }
+      }
+    },
+    {
+      "scene": 14,
+      "description": "Visuals: Sonam Wangchuk standing in the snow in a Ladakh valley on a freezing winter night, opening a valve on a pipe as a fountain of water sprays upward and freezes onto a tall cone of ice.",
+      "narration": "Engineer Sonam Wangchuk piped meltwater downhill and sprayed it into the freezing air. It froze into a towering cone of ice called an ice stupa.",
+      "prompt": "Medium shot, 50mm lens, cold winter night light, Sonam Wangchuk standing in snow, both hands on a valve, water spraying upward, a tall cone of ice behind him, snowy mountains in the background, maroon robe visible under a layer of ice.",
+      "image_provider": "cloudflare",
+      "quality": {
+        "horizontal": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        },
+        "vertical": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        }
+      }
+    },
+    {
+      "scene": 18,
+      "description": "Visuals: Smart Village Boy sitting beside the wooden globe on the Kenyan hilltop at sunset, smiling as he looks at the five red pins.",
+      "narration": "Five villages, five problems and five brilliant answers. Not one of them needed a big budget.",
+      "prompt": "Medium shot, 50mm lens, warm sunset light, Smart Village Boy sitting on a Kenyan hilltop, right hand resting on the wooden globe, left hand holding one of the red pins, bright smile, five red pins stuck in the globe, savannah in the background.",
+      "image_provider": "cloudflare",
+      "quality": {
+        "horizontal": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        },
+        "vertical": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        }
+      }
+    },
+    {
+      "scene": 19,
+      "description": "Visuals: Smart Village Boy waving towards the viewer on the Kenyan hilltop at dusk, with the first stars appearing above the village.",
+      "narration": "Which hack would you use where you live? Share one from your own village in the comments, and subscribe for more.",
+      "prompt": "Medium shot, 50mm lens, warm dusk light, Smart Village Boy standing on a Kenyan hilltop, right hand raised with open palm, left hand at his side, bright smile, savannah and village in the background with first stars appearing in the sky.",
+      "image_provider": "cloudflare",
+      "quality": {
+        "horizontal": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        },
+        "vertical": {
+          "ok": true,
+          "problems": [],
+          "score": 10
+        }
+      }
+    }
+  ]
+}

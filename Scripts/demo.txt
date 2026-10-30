@@ -1,9 +1,0 @@
-﻿# Demo script - each paragraph becomes one scene.
-[video]
-Welcome to your new AI video studio. This video was made entirely from a text script.
-
-[visual: assets/demo/test_clip.mp4]
-Each paragraph becomes a scene. You can attach your own footage, and short clips loop automatically to fit the narration.
-
-[visual: assets/demo/test_image.png]
-Still images get a slow cinematic zoom. Captions are generated automatically and burned into the final export.
