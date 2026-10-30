@@ -1,4 +1,4 @@
-# YouTube upload: Script2_realistic
+# YouTube upload: Script2
 
 Length 2:15. Metadata written by make_video.py from the script (no AI); check it before uploading.
 
@@ -50,7 +50,7 @@ smart village boy, sonam wangchuk, water, light, villagers, farmers, hack, veget
 
 ## Thumbnail
 
-`Script2_realistic_thumbnail.jpg` (1280x720): "ELECTRICITY FRIDGE RUNNING" on scene 5's picture (the most colourful and contrasty).
+`thumbnail.jpg` (1280x720): "ELECTRICITY FRIDGE RUNNING" on scene 5's picture (the most colourful and contrasty).
 
 ## Before uploading
 

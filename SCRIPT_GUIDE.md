@@ -236,7 +236,7 @@ estimate until a full narration is measured; `--check` uses the current figure.)
 - **Structure for 8–10 minutes:** a hook of 3–4 scenes, 5 hacks of 8–12 scenes each, and an ending of 2–3 scenes.
 - **Shorts are automatic:** the vertical version is the same script split into parts of under 2:50 each, including the
   intro and outro, at scene boundaries and at chapter headings wherever possible. They're saved as
-  `<name>_vertical_part1.mp4`, `<name>_vertical_part2.mp4` and so on. Each starts with "Part 1 of N", and every part but the
+  `<name>_Short_Part1.mp4`, `<name>_Short_Part2.mp4` and so on, in the video's `Upload` folder. Each starts with "Part 1 of N", and every part but the
   last ends with "Watch Part 2" instead of the subscribe card. Keep each `# HACK` section under about 2:40 (around 15
   scenes), so a chapter fits in one Short and never has to be cut in the middle. `--check` lists every part with its scenes,
   chapters and length.

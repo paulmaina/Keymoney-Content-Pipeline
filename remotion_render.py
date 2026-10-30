@@ -386,20 +386,19 @@ def cut_audio(narration, t0, t1, out):
     return out
 
 
-def plan_cuts(scenes, formats, base, parts):
+def plan_cuts(scenes, formats, out, parts):
     """[(format, first scene, end scene, (k, n) or None, output path)]: the whole script for the horizontal video, and
-    the vertical one as parts when it needs more than one."""
-    import shorts
+    the vertical one as parts when it needs more than one (`out`: outputs.Outputs)."""
     cuts = []
     for fmt in formats:
         if fmt == "vertical" and parts and len(parts) > 1:
-            cuts += [(fmt, a, b, (k, len(parts)), shorts.part_path(base, k)) for k, (a, b) in enumerate(parts, 1)]
+            cuts += [(fmt, a, b, (k, len(parts)), out.short(k)) for k, (a, b) in enumerate(parts, 1)]
         else:
-            cuts.append((fmt, 0, len(scenes), None, base.with_name(f"{base.name}_{fmt}.mp4")))
+            cuts.append((fmt, 0, len(scenes), None, out.video(fmt)))
     return cuts
 
 
-def render_all(scenes, work, narration, chunks, font_path, args, formats, base, script, parts=None):
+def render_all(scenes, work, narration, chunks, font_path, args, formats, out, script, parts=None):
     """Render every format with Remotion: the horizontal video from the whole script, and the vertical one as the
     `parts` [(first, end)] of a Shorts series when there are several. Returns (output paths, seconds before the
     narration starts, total seconds) for the full-length video."""
@@ -419,7 +418,7 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, base, 
         assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
         moves[fmt] = plan_moves(scenes, script.stem, {i for i, a in enumerate(assets[fmt]) if a.get("mask")})
     parallax = " / ".join(f"{sum(bool(a.get('mask')) for a in assets[f])} {f}" for f in formats)
-    cuts = plan_cuts(scenes, formats, base, parts)
+    cuts = plan_cuts(scenes, formats, out, parts)
     frames = {c: timeline(durations[c[1]:c[2]], fps, intro, outro)[3] for c in cuts}
     n_parts = sum(c[3] is not None for c in cuts)
     print(f"  {len(scenes)} scenes, parallax on {parallax}"
@@ -436,7 +435,7 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, base, 
     starts = [sum(durations[:i]) for i in range(len(scenes) + 1)]  # where each scene starts in the narration
     outs = []
     for cut in cuts:
-        fmt, a, b, part, out = cut
+        fmt, a, b, part, video = cut
         name = f"{fmt}_part{part[0]}" if part else fmt
         sub = scenes[a:b]
         c_lead, c_lengths, c_bounds, c_total = timeline(durations[a:b], fps, intro, outro)
@@ -459,7 +458,7 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, base, 
             "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
         save_speed(fmt, (time.time() - t0) / c_total)
         print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
-        outs.append(mv.mux(silent, audio, args, out, cwd=rwork, video_codec=["-c:v", "copy"]))
+        outs.append(mv.mux(silent, audio, args, video, cwd=rwork, video_codec=["-c:v", "copy"]))
     return outs, lead / fps, total / fps
 
 

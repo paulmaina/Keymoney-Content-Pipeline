@@ -114,9 +114,11 @@ def hours_cap(n):
 
 
 def upscale_scenes(scenes, formats, cli=None, sleep=time.sleep, clock=time.monotonic,
-                   interval=kaggle_runner.POLL_SECONDS):
+                   interval=kaggle_runner.POLL_SECONDS, work=None):
     """Upscale every small scene image not in the cache in one Kaggle run, then use the upscaled images.
-    Returns the GPU minutes used (None if Kaggle wasn't needed or didn't report it)."""
+    `work` holds the Kaggle job files (the video's Working/kaggle/upscale); the upscaled images always go to the shared
+    cache. Returns the GPU minutes used (None if Kaggle wasn't needed or didn't report it)."""
+    work = Path(work) if work else WORK
     images = scene_images(scenes, formats)
     small = [p for p in images if long_side(p) < MIN_SIDE]
     todo = [p for p in small if not cached_path(p).exists()]
@@ -126,11 +128,11 @@ def upscale_scenes(scenes, formats, cli=None, sleep=time.sleep, clock=time.monot
     if todo:
         try:
             cli = cli or kaggle_runner.KaggleCLI(kaggle_runner.api_token())
-            job_dir = WORK / "job"
+            job_dir = work / "job"
             items = export_job(todo, job_dir)
             print(f"Sending {len(todo)} image(s) to Kaggle for Real-ESRGAN in one batch...")
             status, run_dir, used, watched = kaggle_runner.run_notebook(
-                cli, NOTEBOOK, SLUG, job_dir, WORK, hours_cap(len(todo)), sleep=sleep, clock=clock, interval=interval)
+                cli, NOTEBOOK, SLUG, job_dir, work, hours_cap(len(todo)), sleep=sleep, clock=clock, interval=interval)
             got, entries = collect(run_dir, {i["key"] for i in items})
             gpu = (f"about {used:.1f} min (session length from Kaggle's log, which is what counts against the "
                    f"~30 free GPU hours a week)" if used is not None else

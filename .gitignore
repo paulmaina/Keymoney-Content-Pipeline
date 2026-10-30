@@ -16,6 +16,10 @@ Exports/.clips_*/
 Exports/*_video_job/
 Exports/*_video_job.zip
 Exports/*_kaggle/
+# each video's temporary files: renders, Kaggle job files and run logs
+Exports/*/Working/render/
+Exports/*/Working/kaggle/
+Exports/*/Working/log.txt
 
 # research.py transcripts: other creators' words, for analysis only
 Research/_raw/

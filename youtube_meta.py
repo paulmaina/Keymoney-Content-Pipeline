@@ -1,7 +1,7 @@
 """YouTube upload kit, written by make_video.py after a render (--no-metadata skips it):
 
-  Exports/<name>_youtube.md       3 title options, a description with chapters, and 10-15 tags
-  Exports/<name>_thumbnail.jpg    1280x720 JPEG under 2 MB with 2-4 words of bold text
+  Exports/<name>/Upload/youtube.md      3 title options, a description with chapters, 10-15 tags, and a section per Short
+  Exports/<name>/Upload/thumbnail.jpg   1280x720 JPEG under 2 MB with 2-4 words of bold text
 
 Chapters come from the real scene timings, grouped by the script's all-caps section headings
 ("# HOOK", "# HACK 1 NIGERIA - Visuals: ..."). YouTube only shows chapters when the first starts at 0:00,
@@ -533,8 +533,9 @@ def generated_picture(scenes, providers, style):
 
 # ---------- entry point ----------
 
-def write(scenes, script, base, args, work, total, lead_in=0.0, parts=None):
-    """Write <base>_youtube.md and <base>_thumbnail.jpg. Returns both paths. total is the video's length and
+def write(scenes, script, out, args, work, total, lead_in=0.0, parts=None):
+    """Write Upload/youtube.md and Upload/thumbnail.jpg into the video's folder (`out`: outputs.Outputs). Returns both
+    paths. total is the video's length and
     lead_in the seconds before the narration starts (the Remotion intro), which the first chapter covers.
     parts [(first, end)]: the vertical Shorts series, which gets a section per part (titles, description, tags)."""
     channel = args.channel
@@ -574,14 +575,13 @@ def write(scenes, script, base, args, work, total, lead_in=0.0, parts=None):
         notes["thumbnail"] = "an AI image of the opening scene"
     else:
         notes["thumbnail"] = "a plain gradient (every scene is a title card)"
-    thumb = make_thumbnail(picture, meta["thumbnail_text"], args.font.resolve(),
-                           base.with_name(base.name + "_thumbnail.jpg"))
+    thumb = make_thumbnail(picture, meta["thumbnail_text"], args.font.resolve(), out.thumbnail)
     desc = description(meta, chaps, scenes, channel)
-    md = base.with_name(base.name + "_youtube.md")
-    text = markdown(base.name, meta, desc, chaps, thumb, total, notes)
+    md = out.youtube
+    text = markdown(out.name, meta, desc, chaps, thumb, total, notes)
     if parts:
         import shorts
-        text += shorts_markdown(base, [part_meta(scenes, script, sections, parts, k, channel, providers,
+        text += shorts_markdown(out, [part_meta(scenes, script, sections, parts, k, channel, providers,
                                                  shorts.branding_of(args))
                                        for k in range(1, len(parts) + 1)], meta["titles"][0])
     md.write_text(text, encoding="utf-8")
@@ -623,21 +623,20 @@ def part_meta(scenes, script, sections, parts, k, channel, providers=None, brand
             "seconds": secs, "from_model": bool(reply)}
 
 
-def shorts_markdown(base, metas, full_title):
-    import shorts
+def shorts_markdown(out, metas, full_title):
     n = len(metas)
-    out = ["", f"## Shorts series: {n} parts", "",
-           f"The vertical video is split into {n} Shorts at scene boundaries (each under 3 minutes). Upload the full "
-           f"video (\"{full_title}\") first, then in each Short's description replace {FULL_LINK} with its link, and "
-           "in YouTube Studio set the full video as the Short's **Related video**. Upload the parts in order.", ""]
+    lines = ["", f"## Shorts series: {n} parts", "",
+             f"The vertical video is split into {n} Shorts at scene boundaries (each under 3 minutes). Upload the full "
+             f"video (\"{full_title}\") first, then in each Short's description replace {FULL_LINK} with its link, and "
+             "in YouTube Studio set the full video as the Short's **Related video**. Upload the parts in order.", ""]
     for m in metas:
-        path = shorts.part_path(base, m["k"])
-        out += [f"### Part {m['k']} of {n}: `{path.name}`", "",
-                f"Scenes {m['scenes'][0]}-{m['scenes'][1]}, about {timestamp(m['seconds'])}"
-                f"{' (' + ', '.join(m['chapters']) + ')' if m['chapters'] else ''}. "
-                f"{'Written by the Workers AI text model' if m['from_model'] else 'Built from the script (no AI)'}.",
-                "", "Titles:", ""]
-        out += [f"{i}. {t} ({len(t)} characters)" for i, t in enumerate(m["titles"], 1)]
-        out += ["", "Description:", "", "```text", m["description"], "```", "",
-                f"Tags ({len(m['tags'])}):", "", "```text", ", ".join(m["tags"]), "```", ""]
-    return "\n".join(out)
+        path = out.short(m["k"])
+        lines += [f"### Part {m['k']} of {n}: `{path.name}`", "",
+                  f"Scenes {m['scenes'][0]}-{m['scenes'][1]}, about {timestamp(m['seconds'])}"
+                  f"{' (' + ', '.join(m['chapters']) + ')' if m['chapters'] else ''}. "
+                  f"{'Written by the Workers AI text model' if m['from_model'] else 'Built from the script (no AI)'}.",
+                  "", "Titles:", ""]
+        lines += [f"{i}. {t} ({len(t)} characters)" for i, t in enumerate(m["titles"], 1)]
+        lines += ["", "Description:", "", "```text", m["description"], "```", "",
+                  f"Tags ({len(m['tags'])}):", "", "```text", ", ".join(m["tags"]), "```", ""]
+    return "\n".join(lines)

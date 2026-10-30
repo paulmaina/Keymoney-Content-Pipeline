@@ -1,14 +1,20 @@
 # AI Video Editor
 
-Turn a text script into narrated, captioned videos ready for social media. One run makes both:
+Turn a text script into narrated, captioned videos ready for social media. Each video gets its own folder,
+`Exports/<name>/`, named after the script (or `-o`). `Upload/` holds only what goes to YouTube:
 
-| File | Size | For |
+| `Exports/<name>/Upload/` | Size | For |
 |---|---|---|
-| `Exports/<name>_horizontal.mp4` | 1920x1080 | YouTube, Facebook |
-| `Exports/<name>_vertical_part1.mp4`, `_part2.mp4`, ... | 1080x1920 | YouTube Shorts, Reels, TikTok: the same script as a numbered series of parts under 2:50 each ([Shorts series](#vertical-shorts-series)); a script that fits in one is a single `<name>_vertical.mp4` |
-| `Exports/<name>.srt` | | Caption file (same timings for both videos) |
-| `Exports/<name>_youtube.md` | | Title options, description with chapters, and tags ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
-| `Exports/<name>_thumbnail.jpg` | 1280x720 | YouTube thumbnail with 2–4 words of bold text |
+| `<name>.mp4` | 1920x1080 | The full video for YouTube |
+| `<name>_Short_Part1.mp4`, `_Short_Part2.mp4`, ... | 1080x1920 | YouTube Shorts (also Reels, TikTok): the same script as a numbered series of parts under 2:50 each ([Shorts series](#vertical-shorts-series)); a script that fits in one is a single `<name>_Short.mp4` |
+| `thumbnail.jpg` | 1280x720 | YouTube thumbnail with 2–4 words of bold text |
+| `youtube.md` | | Titles, descriptions, chapters and tags, with a section per Short ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
+
+`Exports/<name>/Working/` holds everything else: `prompts.json` (image prompts and the character sheet), `media.json` (stock
+picks and credits), `image_checks.json` (`--check-images` verdicts), the captions (`<name>.srt` and one per Short), `log.txt`
+(everything the run printed), `kaggle/` (job files of the Kaggle runs) and `render/` (temporary files, removed after the run
+unless `--keep-work`). The images, upscaled images, stock media and voice lines stay in the shared caches in `generated/`, so
+a new folder never regenerates anything. The run ends by printing the `Upload` folder's path.
 
 The voice over and captions are generated once and shared by both videos. By default the videos are rendered with
 [Remotion](#motion-with-remotion-default): eased pans and zooms with a subtle 2.5D parallax, crossfades, animated captions,
@@ -119,7 +125,7 @@ With these defaults, the whole command is `.venv\Scripts\python make_video.py Sc
 | `--no-branding` | Remotion: leave out the channel intro and outro |
 | `--no-parallax` | Remotion: plain pans and zooms only (skips the depth model) |
 | `--caption-style bold` | Remotion captions: `bold`, `clean` or `minimal` for both formats (default `auto`: bold vertical, clean horizontal) |
-| `-o Exports\promo` | Base name for outputs, giving `promo_horizontal.mp4`, `promo_vertical.mp4` and `promo.srt` |
+| `-o Promo` | The video's folder and name (default: the script's name): `Exports\Promo\Upload\Promo.mp4` and so on. A path (`-o D:\Videos\Promo`) is used as the folder |
 | `--engine kokoro` | Offline voice instead of Microsoft's online voices |
 | `--engine chatterbox` | Chatterbox voice made on a free Kaggle GPU (see [Chatterbox voice](#chatterbox-voice-on-kaggle---engine-chatterbox)); `--chatterbox-voice`, `--chatterbox-emotion`, `--chatterbox-cfg` |
 | `--voice en-US-GuyNeural` | Choose a voice (defaults: `en-US-AriaNeural` online, `af_heart` offline) |
@@ -145,7 +151,7 @@ With these defaults, the whole command is `.venv\Scripts\python make_video.py Sc
 | `--no-captions` | Don't burn in captions (the `.srt` is still useful for YouTube's caption upload) |
 | `--whisper-model small` | More accurate caption timing, but slower |
 | `--caption-words 4` | Fewer words per caption line |
-| `--no-metadata` | Don't write `<name>_youtube.md` and `<name>_thumbnail.jpg` after rendering |
+| `--no-metadata` | Don't write `Upload/youtube.md` and `Upload/thumbnail.jpg` after rendering |
 | `--metadata-model @cf/...` | Workers AI model for the YouTube titles, description and tags (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, ~65 neurons) |
 | `--channel "My Channel"` | Channel name used in the YouTube metadata (default Smart Village Boy) |
 
@@ -154,7 +160,7 @@ With these defaults, the whole command is `.venv\Scripts\python make_video.py Sc
 Examples:
 ```
 .venv\Scripts\python make_video.py Scripts\demo.txt --format vertical --music "Raw Footage\song.mp3"
-.venv\Scripts\python make_video.py Scripts\demo.txt --engine kokoro --voice am_michael -o Exports\demo_offline
+.venv\Scripts\python make_video.py Scripts\demo.txt --engine kokoro --voice am_michael -o demo_offline
 ```
 
 Voices: run `.venv\Scripts\edge-tts --list-voices` for the online ones (e.g. `en-US-AndrewNeural`, `en-GB-SoniaNeural`).
@@ -205,16 +211,16 @@ The horizontal video uses the whole script, with no length limit (plan 8–10 mi
 script split into parts of **under 2:50 each, including the intro and outro**, so each fits YouTube Shorts:
 - **Where it cuts:** only between scenes, and at chapter headings (`# HACK 2 ...`) wherever possible. Among those splits it picks
   the fewest parts, then the most even lengths. A chapter longer than a Short is cut inside, evenly.
-- **Files:** `Exports/<name>_vertical_part1.mp4`, `_part2.mp4` and so on. A script that fits in one part makes a single
-  `<name>_vertical.mp4` with the normal intro and outro.
+- **Files:** `Upload/<name>_Short_Part1.mp4`, `_Short_Part2.mp4` and so on. A script that fits in one part makes a single
+  `Upload/<name>_Short.mp4` with the normal intro and outro.
 - **Each part:** the intro shows "PART 1 OF N"; every part but the last ends with "Watch Part 2" (with a swipe-up arrow) instead
   of the subscribe card; the last ends with the normal subscribe outro. Each part has its own captions, place labels and map
   pins, and its own slice of the narration.
 - **`--check`** lists the main video's length and every part's scene range, chapters and length, before anything is made.
-- **`_youtube.md`** gets a section per part: Shorts titles ending "(Part 2/5)", a description without chapters that links to the
+- **`youtube.md`** gets a section per part: Shorts titles ending "(Part 2/5)", a description without chapters that links to the
   full video (replace `FULL_VIDEO_LINK` after uploading it) and tags. Each part's notes are one more text-model call (~95
   neurons, upper estimate).
-- **Captions:** each part also gets its own `<name>_vertical_partN.srt`, with only its words, timed from 0:00 plus its intro,
+- **Captions:** each part also gets its own `Working/<name>_Short_PartN.srt`, with only its words, timed from 0:00 plus its intro,
   for uploading with that Short (the captions are burned in too).
 - With `--renderer ffmpeg` the parts are cut from the full vertical video, without the part badge or intro. Its scenes are
   encoded to whole frames on one shared timeline, so every cut lands on a scene's first picture.
@@ -223,10 +229,10 @@ Preview or tweak the design with `npx remotion studio` in `remotion/` (the colou
 for individuals and small companies; see [remotion.dev/license](https://www.remotion.dev/license).
 
 ### YouTube metadata and thumbnail
-After rendering, two upload helpers are written next to the videos (`--no-metadata` skips them):
-- **`Exports/<name>_youtube.md`**: 3 curiosity-driven title options under 60 characters (no clickbait), a ready-to-paste description (hook, short summary,
+After rendering, two upload helpers are written into `Upload/` next to the videos (`--no-metadata` skips them):
+- **`youtube.md`**: 3 curiosity-driven title options under 60 characters (no clickbait), a ready-to-paste description (hook, short summary,
   chapters, a line saying whether the visuals are AI-generated, hashtags), the chapters on their own, and 10–15 tags.
-- **`Exports/<name>_thumbnail.jpg`**: 1280x720, under 2 MB, with 2–4 words of bold text in the bundled font, on the most colourful
+- **`thumbnail.jpg`**: 1280x720, under 2 MB, with 2–4 words of bold text in the bundled font, on the most colourful
   and contrasty scene picture (its 16:9 image). If every scene is a title card it draws one AI image (about 132 neurons, cached), or
   uses a plain gradient.
 
@@ -375,7 +381,7 @@ This writes the prompts and stops, using only the text model. Check how people, 
 single still image can't show, such as "time-lapse", "fast cuts" or animations, and anything that would render as text. Then run
 again with `--generate-visuals` and the same `-o`.
 
-Prompts are saved to `Exports/<name>_prompts.json`:
+Prompts are saved to `Exports/<name>/Working/prompts.json`:
 ```json
 {"style": "photorealistic ...", "scenes": [{"scene": 4, "narration": "In northern Nigeria, heat can...", "prompt": "Medium shot, 50mm lens..."}]}
 ```
@@ -396,7 +402,7 @@ Image models draw each scene separately, so the same character can look differen
    time is **added to the sheet**; roles ("Villagers", "Farmer 1") aren't. Existing entries never change, and your declarations win.
 4. That scene's image prompt gets the description, with the name swapped for a role.
 
-The sheet is saved under `"characters"` in `Exports/<name>_prompts.json`; edit it there like the prompts. Image models still vary a little,
+The sheet is saved under `"characters"` in `Working/prompts.json`; edit it there like the prompts. Image models still vary a little,
 so keep descriptions short, concrete and identical across scenes: "yellow dress, red sandals", not "brightly dressed".
 
 ### Style
@@ -477,7 +483,7 @@ whichever exist are used, and with neither the run goes straight to AI images.
 - **Caching and limits:** searches are cached for 24 hours (Pixabay's terms ask for it) and downloads for good, in `generated/stock/`.
   Pixabay allows 100 requests a minute, Pexels 200 an hour; the limits are read from the response headers and remembered, a short
   Pixabay wait is sat out, and a long block switches to the other provider. A 19-scene video needs about 3–6 searches per provider per scene the first time.
-- **Credits:** `Exports/<name>_media.json` lists each scene's choice (stock, AI, your own file, title card), the provider, the
+- **Credits:** `Working/media.json` lists each scene's choice (stock, AI, your own file, title card), the provider, the
   creator, the link, the query and the scores. The YouTube description credits every stock clip and photo ("Video by … on Pixabay:
   link") with a link to Pexels and Pixabay, as both ask, and its AI line says which visuals are AI-generated.
 - `--check` shows which scenes would search for stock, which stay AI and why, and what the last run chose.

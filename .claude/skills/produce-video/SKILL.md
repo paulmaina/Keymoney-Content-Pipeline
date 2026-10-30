@@ -103,7 +103,7 @@ channel's boy into Sonam Wangchuk's scene and called Alfredo Moser Nigerian, so 
 
 Always review prompts before spending image quota:
 1. `--prompts-only` (plus the same `-o`/`--style` you'll render with) writes
-   `Exports/<name>_prompts.json` and stops. It uses only the text model.
+   `Exports/<name>/Working/prompts.json` and stops. It uses only the text model.
 2. Read every prompt and fix it in the JSON. Common problems seen so far:
    - Previous-scene context applied too strongly (the same subject or person carried into an unrelated scene).
    - Generic people ("African villager") or vague "traditional clothing": name the region, and describe
@@ -151,7 +151,7 @@ Always review prompts before spending image quota:
 - Videos first, then photos; real footage and photos only. One pool scored by `@cf/meta/llama-3.1-8b-instruct-fp8-fast`
   (keyword overlap without Cloudflare, which picks badly in `stock` mode, so tell the user), plus bonuses for video,
   1080p sharpness, orientation and length; chosen per format, Pexels on a tie. ~10 neurons a scene.
-- `Exports/<name>_media.json` records each scene's choice, provider, creator and link; the YouTube description credits them.
+- `Exports/<name>/Working/media.json` records each scene's choice, provider, creator and link; the YouTube description credits them.
   Check the stock picks in frames: tags can match a clip that shows the wrong country or a staged scene.
 - Searches are cached 24 h and downloads for good in `generated/stock/`; Pixabay is 100 requests/min, Pexels 200/hour.
 
@@ -185,8 +185,8 @@ beyond them.)
 - `--format vertical` or `horizontal` renders only one (and draws only that image shape); `--music <file>` adds ducked background music.
 - **No length cap; the vertical video is a Shorts series** (`shorts.py`): the horizontal video uses the whole script (plan 8-10
   minutes), and the vertical one is split at scene boundaries into parts under 2:50 including the intro and outro, at chapter
-  headings wherever possible: `<name>_vertical_part1.mp4`, ... ("Part 1 of N" in the intro, "Watch Part 2" in every outro but
-  the last). One part only gives a plain `<name>_vertical.mp4`. `--check` lists each part's scenes and length; `_youtube.md` has
+  headings wherever possible: `Upload/<name>_Short_Part1.mp4`, ... ("Part 1 of N" in the intro, "Watch Part 2" in every outro but
+  the last). One part only gives a single `<name>_Short.mp4`. `--check` lists each part's scenes and length; `youtube.md` has
   a section per part (Shorts titles, description with `FULL_VIDEO_LINK` to replace, tags).
 - **Several days of Cloudflare:** `--check` says how many days a script needs. Then run `--visuals-only` once a day (images are
   cached) until `--check` shows 0 new images, and only then the full render. Don't start a full render that would run out of
@@ -214,7 +214,12 @@ beyond them.)
   `useCurrentFrame()` + `interpolate()`/`spring()`, never CSS transitions.
 
 ### YouTube metadata and thumbnail (on by default)
-After rendering, `make_video.py` writes `Exports/<name>_youtube.md` and `Exports/<name>_thumbnail.jpg`; `--no-metadata` skips both.
+**Output folders** (`outputs.py`): each video gets `Exports/<name>/` (the script's name, or `-o`). `Upload/` holds only what
+goes to YouTube (`<name>.mp4`, `<name>_Short_PartN.mp4`, `thumbnail.jpg`, `youtube.md`); `Working/` holds `prompts.json`,
+`media.json`, `image_checks.json`, the `.srt` files, `log.txt`, `kaggle/` and `render/`. Images, upscaled images, stock media
+and voice lines stay in the shared `generated/` caches. The run prints the Upload folder at the end; give the user that path.
+
+After rendering, `make_video.py` writes `Upload/youtube.md` and `Upload/thumbnail.jpg`; `--no-metadata` skips both.
 - The `.md` has 3 title options (under 60 characters, curiosity-driven but accurate, with counts), a ready-to-paste description (hook, summary, chapters,
   a line saying whether visuals are AI-generated, hashtags), the chapters, and 10-15 tags.
 - Chapters use the real scene timings, grouped by all-caps section headings in the script: `# HOOK`, `# INTRO`,
@@ -236,13 +241,13 @@ After rendering, `make_video.py` writes `Exports/<name>_youtube.md` and `Exports
   script), and remind them to declare altered or synthetic content in YouTube Studio: with photorealistic images that's always.
 
 ## 4. Check before handing over
-- `ffprobe` both outputs in `Exports/`: 1920x1080 and 1080x1920, each with an audio stream.
-- Read `Exports/<name>.srt` for caption problems, and grab a frame or two with
+- `ffprobe` the videos in `Exports/<name>/Upload/`: 1920x1080 and 1080x1920, each with an audio stream.
+- Read `Working/<name>.srt` for caption problems, and grab a frame or two with
   `ffmpeg -ss <t> -i <mp4> -frames:v 1 <scratch png>` to look at the result.
 - With AI images, look at frames from several scenes in both formats: check the subject is in frame, the right person is in
   each scene, people are depicted respectfully, and there's no stray lettering or warped hands and faces.
 - Remotion renders: also check a frame just after each place label appears (label text, map pin on the right country), one
   mid-crossfade, and the intro and outro. In the vertical video, captions sit at ~66% height and the map near the top.
-- Look at `Exports/<name>_thumbnail.jpg` and read `Exports/<name>_youtube.md` (titles, chapters, tags).
+- Look at `Upload/thumbnail.jpg` and read `Upload/youtube.md` (titles, chapters, tags, the Shorts sections).
 - Tell the user the output paths, the duration, the neurons and GPU time used, and which scenes used text cards, a Pollinations
   fallback or fallback footage.

@@ -3,8 +3,8 @@
 The horizontal video uses the whole script, however long. The vertical one is the same script cut into parts at scene
 boundaries, each at most LIMIT seconds including the intro and outro, so every part fits Shorts (3 minutes or less).
 Cuts go at chapter headings (# HOOK, # HACK 2 ...) wherever that's possible, so each part feels complete; among the
-ways to do that, the fewest parts, then the most even lengths. Parts are saved as <name>_vertical_part1.mp4, ...;
-a script that fits in one part still makes a single <name>_vertical.mp4.
+ways to do that, the fewest parts, then the most even lengths. Parts are saved as Upload/<name>_Short_Part1.mp4, ...;
+a script that fits in one part makes a single Upload/<name>_Short.mp4 (see outputs.py).
 """
 import make_video as mv
 
@@ -73,10 +73,6 @@ def plan(scenes, script, args, durations=None):
     sections = mv.parse_sections(script)
     durations = durations if durations is not None else [s["dur"] for s in scenes]
     return split(durations, sections, branding=branding_of(args))
-
-
-def part_path(base, k):
-    return base.with_name(f"{base.name}_vertical_part{k}.mp4")
 
 
 def describe(parts, durations, sections, branding):
