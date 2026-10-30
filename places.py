@@ -158,9 +158,10 @@ def overrides(path):
     return out
 
 
-def scene_places(scenes, script=None):
-    """[(scene index, Place, show map, countries pinned before)] for each scene where the place changes."""
-    forced = overrides(script) if script else []
+def scene_places(scenes, script=None, first=0):
+    """[(scene index, Place, show map, countries pinned before)] for each scene where the place changes. `scenes` may
+    be a slice of the script starting at scene `first` (a vertical part), so its '# location:' lines still line up."""
+    forced = overrides(script)[first:first + len(scenes)] if script else []
     if len(forced) != len(scenes):
         forced = [None] * len(scenes)
     out, last, visited = [], None, []

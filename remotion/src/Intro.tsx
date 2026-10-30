@@ -1,11 +1,13 @@
 import React from 'react';
 import {AbsoluteFill, Easing, interpolate, spring, useCurrentFrame, useVideoConfig} from 'remotion';
 import {BRAND, FONT, outline} from './theme';
+import type {Part} from './types';
 
 const clamp = {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'} as const;
 
 // A rising sun over a hill, then the channel name word by word and the tagline. About 2 seconds.
-export const Intro: React.FC<{channel: string; tagline: string}> = ({channel, tagline}) => {
+// In a Shorts series, a "PART 1 OF 4" badge pops in first, above the name.
+export const Intro: React.FC<{channel: string; tagline: string; part?: Part | null}> = ({channel, tagline, part}) => {
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const unit = Math.min(width, height);
@@ -71,6 +73,33 @@ export const Intro: React.FC<{channel: string; tagline: string}> = ({channel, ta
       >
         {tagline}
       </div>
+      {part ? <PartBadge part={part} top={height * 0.5 - size * (height > width ? 2.3 : 1.7)} size={size * 0.42} /> : null}
     </AbsoluteFill>
+  );
+};
+
+const PartBadge: React.FC<{part: Part; top: number; size: number}> = ({part, top, size}) => {
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  const pop = spring({frame, fps, config: {damping: 12, stiffness: 170}});
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top,
+        padding: `${size * 0.3}px ${size * 0.8}px`,
+        borderRadius: size,
+        background: BRAND.red,
+        fontFamily: FONT,
+        fontWeight: 700,
+        fontSize: size,
+        color: BRAND.white,
+        letterSpacing: '0.06em',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        scale: String(pop),
+      }}
+    >
+      PART {part.index} OF {part.count}
+    </div>
   );
 };

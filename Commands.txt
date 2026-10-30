@@ -58,8 +58,9 @@ Options typed on the command line always win over the file.
 
 2. SCRIPT FORMAT
 ----------------
-Save a .txt file in Scripts\. Each paragraph (separated by a blank line) is one scene: 2-3 spoken sentences,
-15-17 paragraphs (at most 20) and 400-430 words, so the video stays under 3 minutes and the vertical one is a Short.
+Save a .txt file in Scripts\. Each paragraph (separated by a blank line) is one scene: 2-3 spoken sentences.
+No length cap: plan 8-10 minute videos or longer, about 6-8 scenes and 150 words a minute (50-75 scenes). The vertical
+video is split into Shorts automatically, at chapter headings, so open every # HACK section with a strong first line.
 The full standard is SCRIPT_GUIDE.md (give it to your scripting project); Scripts\TEMPLATE.txt is a worked example:
 copy it to start a new script.
 
@@ -105,19 +106,26 @@ Short example:
    Read Research\MyVideo_factcheck.md and soften anything not confirmed.
 4. Check it (free, no network):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --check
-   Fix every flag. Make sure the Cloudflare total fits today's 10,000 neurons (see section 5).
+   Fix every flag. It shows the main video's length, each Short's scenes and length, and how many days of Cloudflare
+   allowance the images need (section 5). If it's more than one day, do step 6a first.
 5. Optional: review the image prompts first (costs only ~50 neurons a scene):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --prompts-only
    Edit Exports\MyVideo_prompts.json or the # Visuals lines, then carry on.
+6a. Several days of Cloudflare? Make the visuals first, once a day, until --check shows 0 new images:
+       .venv\Scripts\python make_video.py Scripts\MyVideo.txt --visuals-only
 6. Render:
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt
-   That's the whole command: stock or AI visuals, image checks, upscaling, the Chatterbox voice, captions, both formats,
-   and the YouTube notes. A 19-scene video takes about 15-25 minutes, plus a few minutes of Kaggle queueing.
+   That's the whole command: stock or AI visuals, image checks, upscaling, the Chatterbox voice, captions, the full
+   horizontal video, the vertical Shorts series and the YouTube notes. An 8-minute video takes roughly an hour to render
+   (--check estimates it), plus Kaggle queueing.
 7. Review the outputs in Exports\:
        MyVideo_horizontal.mp4    1920x1080, for YouTube
-       MyVideo_vertical.mp4      1080x1920, for Shorts / Reels / TikTok
-       MyVideo.srt               captions
-       MyVideo_youtube.md        title options, description with chapters, tags, hashtags
+       MyVideo_vertical_part1.mp4, _part2.mp4, ...
+                                 1080x1920 Shorts, each under 2:50: "Part 1 of N" at the start, "Watch Part 2" at
+                                 the end (a script that fits in one Short gives a single MyVideo_vertical.mp4)
+       MyVideo.srt               captions for the full video
+       MyVideo_vertical_partN.srt  captions for each Short, timed for that part
+       MyVideo_youtube.md        title options, description with chapters, tags, hashtags; plus a section per Short
        MyVideo_thumbnail.jpg     1280x720 thumbnail
        MyVideo_prompts.json      the image prompts and character sheet (edit, then rerun)
        MyVideo_media.json        which scenes use stock, from where, and the creators to credit
@@ -133,7 +141,10 @@ Short example:
      and the tags.
    - Upload MyVideo_thumbnail.jpg as the thumbnail.
    - Under "Altered or synthetic content", answer YES (realistic AI images and an AI voice).
-   - Upload MyVideo_vertical.mp4 separately as a Short (Shorts must be 3 minutes or less).
+   - Upload the full horizontal video first and copy its link.
+   - Then upload the Shorts in order (part1, part2, ...). Each has its own section in MyVideo_youtube.md: a title ending
+     "(Part 2/5)", a description (replace FULL_VIDEO_LINK with the full video's link) and tags. In YouTube Studio, set
+     the full video as each Short's "Related video".
 
 
 4. COMMANDS
@@ -145,10 +156,12 @@ Planning
                                 time and render time. Changes nothing, no network. Add any options you'll render with
                                 (e.g. --check --new-images) to see their cost.
     --prompts-only              Write Exports\MyVideo_prompts.json, then stop.
+    --visuals-only              Make and cache the prompts and images (checks, stock, upscaling), then stop before the
+                                voice and video. For scripts that need several days of Cloudflare: once a day, then render.
 
 Rendering
     (no options)                The full render with your make_video.toml defaults.
-    --format vertical           Only the vertical video (or horizontal; default both). Halves the image cost.
+    --format vertical           Only the vertical Shorts (or horizontal; default both). Halves the image cost.
     -o Exports\MyVideo_v2       Different output names. NOTE: prompts are saved per output name, so a new -o writes
                                 new prompts and images. Script2's realistic render was saved as -o Exports\Script2_realistic.
     --no-metadata               Skip the YouTube notes and thumbnail.
@@ -219,6 +232,8 @@ When the Cloudflare allowance runs out:
       cards. Prompts fall back to simple ones built from the scene text.
     - Better: stop, wait until 03:00 Nairobi, and rerun the same command. Everything already made is cached, so it
       continues where it stopped.
+    - Long scripts: --check says how many days the images need (an 8-10 minute video is about 2-3 days). Run
+      --visuals-only once a day until --check shows 0 new images, then render once.
     - To fit a day: --format vertical (half the images), --no-check-images, or --media stock / mixed (stock costs no
       image neurons), or redo only some scenes with --redo-scenes.
 When Kaggle hours run out: --engine edge (Emma) and --no-upscale render without Kaggle.

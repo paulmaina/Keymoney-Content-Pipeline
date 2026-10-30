@@ -5,7 +5,7 @@ Turn a text script into narrated, captioned videos ready for social media. One r
 | File | Size | For |
 |---|---|---|
 | `Exports/<name>_horizontal.mp4` | 1920x1080 | YouTube, Facebook |
-| `Exports/<name>_vertical.mp4` | 1080x1920 | Instagram Reels, TikTok, YouTube Shorts |
+| `Exports/<name>_vertical_part1.mp4`, `_part2.mp4`, ... | 1080x1920 | YouTube Shorts, Reels, TikTok: the same script as a numbered series of parts under 2:50 each ([Shorts series](#vertical-shorts-series)); a script that fits in one is a single `<name>_vertical.mp4` |
 | `Exports/<name>.srt` | | Caption file (same timings for both videos) |
 | `Exports/<name>_youtube.md` | | Title options, description with chapters, and tags ([YouTube metadata](#youtube-metadata-and-thumbnail)) |
 | `Exports/<name>_thumbnail.jpg` | 1280x720 | YouTube thumbnail with 2–4 words of bold text |
@@ -130,6 +130,7 @@ With these defaults, the whole command is `.venv\Scripts\python make_video.py Sc
 | `--generate-visuals` | AI images for scenes without a `[visual:]` line (see below); on in `make_video.toml`, `--no-generate-visuals` turns it off |
 | `--style "cinematic, warm tones"` | Added to every AI image prompt |
 | `--prompts-only` | Write the AI image prompts for review, then stop (no images, audio or video) |
+| `--visuals-only` | Make and cache the prompts and images (with checks, stock and upscaling), then stop before the voice and video. For scripts that need several days of Cloudflare allowance: run it once a day, then render |
 | `--regenerate` | Ignore cached AI images and saved prompts for this run (your edited prompts are rewritten) |
 | `--new-images` | Keep the saved prompts but draw every image again; the new ones replace the cached ones |
 | `--redo-scenes "3,7"` | Draw only those scenes' images again with a new seed; everything else stays cached (turns on `--generate-visuals`) |
@@ -198,6 +199,25 @@ headless Chrome on your PC. The voice and music are then mixed by FFmpeg exactly
 too). On an Intel i7-1355U laptop with integrated graphics and 16 GB RAM, Script2 (2:37, 19 scenes) took 286 s to render
 horizontally and 336 s vertically, about 15 frames a second with 6 in parallel. The whole run was 12 minutes, against 6.5 minutes with
 `--renderer ffmpeg`. `--format vertical` or `horizontal` saves about half the render time when you only need one.
+
+### Vertical Shorts series
+The horizontal video uses the whole script, with no length limit (plan 8–10 minutes or more). The vertical video is the same
+script split into parts of **under 2:50 each, including the intro and outro**, so each fits YouTube Shorts:
+- **Where it cuts:** only between scenes, and at chapter headings (`# HACK 2 ...`) wherever possible. Among those splits it picks
+  the fewest parts, then the most even lengths. A chapter longer than a Short is cut inside, evenly.
+- **Files:** `Exports/<name>_vertical_part1.mp4`, `_part2.mp4` and so on. A script that fits in one part makes a single
+  `<name>_vertical.mp4` with the normal intro and outro.
+- **Each part:** the intro shows "PART 1 OF N"; every part but the last ends with "Watch Part 2" (with a swipe-up arrow) instead
+  of the subscribe card; the last ends with the normal subscribe outro. Each part has its own captions, place labels and map
+  pins, and its own slice of the narration.
+- **`--check`** lists the main video's length and every part's scene range, chapters and length, before anything is made.
+- **`_youtube.md`** gets a section per part: Shorts titles ending "(Part 2/5)", a description without chapters that links to the
+  full video (replace `FULL_VIDEO_LINK` after uploading it) and tags. Each part's notes are one more text-model call (~95
+  neurons, upper estimate).
+- **Captions:** each part also gets its own `<name>_vertical_partN.srt`, with only its words, timed from 0:00 plus its intro,
+  for uploading with that Short (the captions are burned in too).
+- With `--renderer ffmpeg` the parts are cut from the full vertical video, without the part badge or intro. Its scenes are
+  encoded to whole frames on one shared timeline, so every cut lands on a scene's first picture.
 
 Preview or tweak the design with `npx remotion studio` in `remotion/` (the colours are in `remotion/src/theme.ts`). Remotion is free
 for individuals and small companies; see [remotion.dev/license](https://www.remotion.dev/license).

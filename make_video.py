@@ -2,7 +2,8 @@
 
 By default both formats are rendered from one narration and one caption track:
   Exports/<name>_horizontal.mp4   1920x1080 for YouTube / Facebook
-  Exports/<name>_vertical.mp4     1080x1920 for Instagram Reels / TikTok / Shorts
+  Exports/<name>_vertical_partN.mp4  1080x1920 Shorts, the script split into parts under 2:50 (shorts.py);
+                                  a script that fits in one is a single <name>_vertical.mp4
   Exports/<name>.srt              caption file (same timings for both)
   Exports/<name>_youtube.md       title options, description with chapters, tags (--no-metadata skips)
   Exports/<name>_thumbnail.jpg    1280x720 thumbnail
@@ -342,20 +343,31 @@ def title_card(text, out, w, h, font_path):
     return out
 
 
-def render_scene(i, src, dur, work, w, h, strong=False):
+def frame_edges(durations, fps=FPS):
+    """Scene boundaries in whole frames: each one rounded from the running total of narration seconds, so rounding never
+    builds up (scene lengths in frames are the differences). The ffmpeg renderer encodes each scene to exactly its frame
+    count and cuts the Shorts at these same frames, so a cut always lands on a scene's first picture."""
+    edges, t = [0], 0.0
+    for d in durations:
+        t += d
+        edges.append(round(t * fps))
+    return edges
+
+
+def render_scene(i, src, frames, work, w, h, strong=False):
+    """One scene's clip of exactly `frames` frames."""
     out = work / f"scene_{i:03}.mp4"
     fit = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
     if src.suffix.lower() in VIDEO_EXT:
         inp = ["-stream_loop", "-1", "-i", src]
         vf = f"{fit},fps={FPS}"
     else:  # still image: slow Ken Burns zoom ([video] scenes zoom further)
-        frames = int(dur * FPS) + 1
         step, top = (0.0011, 1.22) if strong else (0.0006, 1.12)
         inp = ["-loop", "1", "-framerate", str(FPS), "-i", src]
         vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
               f"zoompan=z='min(zoom+{step},{top})':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2'"
-              f":d={frames}:s={w}x{h}:fps={FPS},setsar=1")
-    run(["ffmpeg", "-y", *inp, "-t", f"{dur:.3f}", "-vf", vf, "-an", "-c:v", "libx264",
+              f":d={frames + 1}:s={w}x{h}:fps={FPS},setsar=1")
+    run(["ffmpeg", "-y", *inp, "-frames:v", str(frames), "-vf", vf, "-an", "-c:v", "libx264",
          "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), out])
     return out
 
@@ -494,9 +506,10 @@ def render_format(fmt, scenes, work, narration, srt, font_path, args, out):
     fwork = work / fmt
     fwork.mkdir()
     print(f"Rendering {fmt} ({w}x{h})...")
+    edges = frame_edges([s["dur"] for s in scenes])
     for i, s in enumerate(scenes):
         src = scene_src(s, fmt) or title_card(s["text"], fwork / f"card_{i:03}.png", w, h, font_path)
-        render_scene(i, src, s["dur"], fwork, w, h, strong=bool(s.get("video")))
+        render_scene(i, src, edges[i + 1] - edges[i], fwork, w, h, strong=bool(s.get("video")))
     (fwork / "video.txt").write_text("".join(f"file 'scene_{i:03}.mp4'\n" for i in range(len(scenes))))
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "video.txt", "-c", "copy", "video.mp4"], cwd=fwork)
 
@@ -514,6 +527,45 @@ def render_format(fmt, scenes, work, narration, srt, font_path, args, out):
                      f"Shadow=0,MarginV={spec['margin']}'"]
 
     return mux("video.mp4", narration, args, out, cwd=fwork, filters=vf)
+
+
+def cut_parts(video, scenes, parts, base):
+    """--renderer ffmpeg: the vertical video cut into its Shorts parts at scene boundaries, on the frame timeline the
+    scenes were encoded on (re-encoded, so the cuts are exact); the full-length vertical file is removed."""
+    import shorts
+    starts = part_starts(scenes, "ffmpeg")
+    outs = []
+    for k, (a, b) in enumerate(parts, 1):
+        out = shorts.part_path(base, k)
+        run(["ffmpeg", "-y", "-ss", f"{starts[a]:.3f}", "-t", f"{starts[b] - starts[a]:.3f}", "-i", video,
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+             out])
+        outs.append(out)
+    video.unlink(missing_ok=True)
+    return outs
+
+
+def part_starts(scenes, renderer):
+    """Where each scene starts (seconds), as the renderer laid it out: whole frames for ffmpeg (frame_edges), the exact
+    narration for Remotion (each part gets its own narration cut and frame timeline)."""
+    durations = [s["dur"] for s in scenes]
+    if renderer == "ffmpeg":
+        return [e / FPS for e in frame_edges(durations)]
+    return [sum(durations[:i]) for i in range(len(durations) + 1)]
+
+
+def write_part_srts(chunks, scenes, parts, base, renderer, lead_in):
+    """One .srt per Short (<name>_vertical_partN.srt): only that part's words, timed from the part's own start plus its
+    intro (lead_in), so it lines up when uploaded with the part."""
+    import remotion_render
+    import shorts
+    starts = part_starts(scenes, renderer)
+    outs = []
+    for k, (a, b) in enumerate(parts, 1):
+        part = remotion_render.shift_chunks(chunks, starts[a], starts[b])
+        moved = [[Word(w.text, w.start + lead_in, w.end + lead_in) for w in c] for c in part]
+        outs.append(write_srt(moved, shorts.part_path(base, k).with_suffix(".srt")))
+    return outs
 
 
 def mux(video, narration, args, out, cwd, filters=(), video_codec=None):
@@ -599,6 +651,9 @@ def parse_args(argv=None):
     ap.add_argument("--text-model", default=ai_visuals.TEXT_MODEL,
                     help="Workers AI model that writes the image prompts (~50 neurons a scene)")
     ap.add_argument("--style", default="", help='appended to every image prompt, e.g. "cinematic, warm tones"')
+    ap.add_argument("--visuals-only", action="store_true",
+                    help="make and cache the prompts and images (with their checks, stock and --upscale), then stop "
+                         "before the voice and video: for scripts that need several days of Cloudflare allowance")
     ap.add_argument("--prompts-only", action="store_true",
                     help="write Exports/<name>_prompts.json for review, then stop (no images, audio or video)")
     ap.add_argument("--regenerate", action="store_true",
@@ -650,7 +705,7 @@ def parse_args(argv=None):
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
     args.redo = parse_scene_numbers(args.redo_scenes, ap)
-    args.generate_visuals |= args.prompts_only or bool(args.redo) or args.media == "stock"
+    args.generate_visuals |= args.prompts_only or args.visuals_only or bool(args.redo) or args.media == "stock"
     return args
 
 
@@ -679,8 +734,6 @@ def main():
         args.music = args.music.resolve()
         if not args.music.exists():
             sys.exit(f"Music file not found: {args.music}")
-    if args.engine == "kokoro":
-        check_kokoro_model()
     if args.renderer == "remotion":
         import remotion_render
         ok, why = remotion_render.available()
@@ -723,6 +776,13 @@ def main():
     if args.upscale:
         import upscale
         upscale.upscale_scenes(scenes, formats)
+    if args.visuals_only:
+        missing = f" Still missing: scene(s) {', '.join(map(str, failed_visuals))}." if failed_visuals else ""
+        print(f"Visuals only: prompts and images are saved and cached; no voice or video was made.{missing} "
+              "Run the same command without --visuals-only to render.")
+        return
+    if args.engine == "kokoro":  # voice prerequisites only now: --visuals-only and --prompts-only never need them
+        check_kokoro_model()
     work = base.parent / f".work_{base.name}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
@@ -736,22 +796,35 @@ def main():
         srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
                                     args.whisper_model, args.caption_words)
 
+    import shorts
+    parts = shorts.plan(scenes, script, args) if "vertical" in formats else []
+    if len(parts) > 1:
+        print(f"The vertical video becomes a series of {len(parts)} Shorts:")
+        for line in shorts.describe(parts, [s["dur"] for s in scenes], parse_sections(script), shorts.branding_of(args)):
+            print(f"  {line}")
     lead_in, total = 0.0, duration(narration)
     if args.renderer == "remotion":
         import remotion_render
         outs, lead_in, total = remotion_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
-                                                          base, script)
+                                                          base, script, parts)
     else:
         outs = [render_format(fmt, scenes, work, narration, srt, font_path, args,
                               base.with_name(f"{base.name}_{fmt}.mp4")) for fmt in formats]
+        if len(parts) > 1:  # the plain renderer has no intro or outro, so the parts are cut from the full video
+            outs = [o for o in outs if o.name != f"{base.name}_vertical.mp4"] + cut_parts(
+                base.with_name(f"{base.name}_vertical.mp4"), scenes, parts, base)
+    part_srts = []
     if srt:  # the uploadable caption file, on the video's own timeline (after any intro)
         shift_srt(srt, lead_in, base.with_name(base.name + ".srt"))
+        if len(parts) > 1:  # every Short starts at 0:00 with its own intro, so each gets its own retimed captions
+            part_srts = write_part_srts(chunks, scenes, parts, base, args.renderer, lead_in)
 
     meta = None
     if not args.no_metadata:
         import youtube_meta
         try:
-            meta = youtube_meta.write(scenes, script, base, args, work, total, lead_in=lead_in)
+            meta = youtube_meta.write(scenes, script, base, args, work, total, lead_in=lead_in,
+                                      parts=parts if len(parts) > 1 else None)
         except Exception as e:  # the videos are done; never lose them over the upload notes
             print(f"YouTube metadata failed ({e.__class__.__name__}: {e}); the videos are fine. "
                   "Rerun with --no-metadata to skip it.")
@@ -763,6 +836,8 @@ def main():
         print(f"  {out} ({duration(out):.1f}s)")
     if srt:
         print(f"  {base.with_name(base.name + '.srt')}")
+    for path in part_srts:
+        print(f"  {path}")
     for path in meta or []:
         print(f"  {path}")
     if failed_visuals:

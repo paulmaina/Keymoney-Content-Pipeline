@@ -195,12 +195,13 @@ def map_spot(fmt, faces, show_map):
     return round(top, 4), round(width, 4)
 
 
-def place_props(scenes, script, bounds, fps, fmt=None):
+def place_props(scenes, script, bounds, fps, fmt=None, first=0):
     """Place labels and map pins. In the vertical video, a map or label that would cover a face (in any scene it
-    spans) is moved down below it; those get "top" and "mapWidth", and "until" (its last frame) for the captions."""
+    spans) is moved down below it; those get "top" and "mapWidth", and "until" (its last frame) for the captions.
+    `scenes` may be a vertical part starting at script scene `first`; it gets its own map pins."""
     import captions
     import places
-    found = list(places.scene_places(scenes, script))
+    found = list(places.scene_places(scenes, script, first))
     faces = (captions.scene_faces(scenes, fmt, min_height=MAP_FACE_MIN, margin=MAP_FACE_MARGIN)
              if fmt == "vertical" else None)
     out = []
@@ -325,7 +326,9 @@ def concurrency():
     return max(1, (os.cpu_count() or 4) // 2)
 
 
-def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, places_, args, fps=mv.FPS):
+def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, places_, args, fps=mv.FPS, part=None):
+    """Props for one video. part = (k, n) for part k of n of the vertical series: "Part k of N" in the intro, and
+    "Watch Part k+1" instead of the subscribe card in every outro but the last."""
     w, h = mv.FORMATS[fmt]["size"]
     props_scenes = []
     for s, a, name, length in zip(scenes, assets, moves, lengths):
@@ -336,7 +339,8 @@ def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, place
     return {"width": w, "height": h, "fps": fps, "durationInFrames": total, "transitionFrames": TRANSITION,
             "introFrames": 0 if args.no_branding else INTRO, "outroFrames": 0 if args.no_branding else OUTRO,
             "font": "font.ttf", "channel": args.channel, "tagline": TAGLINE, "scenes": props_scenes,
-            "captions": lines, "captionStyle": caption_style(fmt, args), "places": places_}
+            "captions": lines, "captionStyle": caption_style(fmt, args), "places": places_,
+            "part": {"index": part[0], "count": part[1]} if part else None}
 
 
 def caption_style(fmt, args):
@@ -344,16 +348,16 @@ def caption_style(fmt, args):
     return captions.style_for(fmt, getattr(args, "caption_style", "auto"))
 
 
-def caption_layouts(chunks, scenes, script, formats, args, fps, lead, bounds, blocks=None):
+def caption_layouts(chunks, scenes, script, formats, args, fps, lead, bounds, blocks=None, first=0):
     """{format: caption lines} in each format's style, kept off the faces in that format's pictures and off any map
-    moved down below a face (`blocks`: {format: map_blocks})."""
+    moved down below a face (`blocks`: {format: map_blocks}). `scenes` may be a part starting at scene `first`."""
     import captions
     import places
     if not chunks:
         return {f: [] for f in formats}
     names = list(mv.parse_characters(script))
     places_by_scene = {}
-    for i, place, _, _ in places.scene_places(scenes, script):
+    for i, place, _, _ in places.scene_places(scenes, script, first):
         places_by_scene.setdefault(i, []).append(place.label)
     out = {}
     for fmt in formats:
@@ -367,12 +371,43 @@ def caption_layouts(chunks, scenes, script, formats, args, fps, lead, bounds, bl
     return out
 
 
-def render_all(scenes, work, narration, chunks, font_path, args, formats, base, script):
-    """Render every format with Remotion. Returns (output paths, seconds before the narration starts, total seconds)."""
+def shift_chunks(chunks, t0, t1):
+    """The caption chunks spoken between t0 and t1 seconds of the narration, re-timed to start at t0."""
+    out = []
+    for chunk in chunks or []:
+        words = [mv.Word(w.text, w.start - t0, w.end - t0) for w in chunk if t0 <= w.start < t1]
+        if words:
+            out.append(words)
+    return out
+
+
+def cut_audio(narration, t0, t1, out):
+    mv.run(["ffmpeg", "-y", "-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}", "-i", narration, out])
+    return out
+
+
+def plan_cuts(scenes, formats, base, parts):
+    """[(format, first scene, end scene, (k, n) or None, output path)]: the whole script for the horizontal video, and
+    the vertical one as parts when it needs more than one."""
+    import shorts
+    cuts = []
+    for fmt in formats:
+        if fmt == "vertical" and parts and len(parts) > 1:
+            cuts += [(fmt, a, b, (k, len(parts)), shorts.part_path(base, k)) for k, (a, b) in enumerate(parts, 1)]
+        else:
+            cuts.append((fmt, 0, len(scenes), None, base.with_name(f"{base.name}_{fmt}.mp4")))
+    return cuts
+
+
+def render_all(scenes, work, narration, chunks, font_path, args, formats, base, script, parts=None):
+    """Render every format with Remotion: the horizontal video from the whole script, and the vertical one as the
+    `parts` [(first, end)] of a Shorts series when there are several. Returns (output paths, seconds before the
+    narration starts, total seconds) for the full-length video."""
     ensure_installed()
     fps = mv.FPS
     intro, outro = (0, 0) if args.no_branding else (INTRO, OUTRO)
-    lead, lengths, bounds, total = timeline([s["dur"] for s in scenes], fps, intro, outro)
+    durations = [s["dur"] for s in scenes]
+    lead, lengths, bounds, total = timeline(durations, fps, intro, outro)
     rwork = work / "remotion"
     public = rwork / "public"
     rwork.mkdir(parents=True, exist_ok=True)
@@ -383,46 +418,54 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, base, 
     for fmt in formats:
         assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
         moves[fmt] = plan_moves(scenes, script.stem, {i for i, a in enumerate(assets[fmt]) if a.get("mask")})
-    places_ = {f: place_props(scenes, script, bounds, fps, f) for f in formats}
-    lines = caption_layouts(chunks, scenes, script, formats, args, fps, lead, bounds,
-                            {f: map_blocks(places_[f], f) for f in formats})
     parallax = " / ".join(f"{sum(bool(a.get('mask')) for a in assets[f])} {f}" for f in formats)
-    some = places_[formats[0]]
-    moved = sum("top" in p for f in formats for p in places_[f])
-    print(f"  {len(scenes)} scenes, parallax on {parallax}, {len(some)} place label(s), "
-          f"{sum(p['showMap'] for p in some)} map pin(s), {moved} moved below a face")
-    secs, measured = estimate(total, formats)
-    print(f"Remotion render: {total} frames per format; estimated ~{minutes(secs)} for {' + '.join(formats)} "
-          f"({'measured on this PC' if measured else 'first-run guess; the next estimate uses your real speed'}, "
+    cuts = plan_cuts(scenes, formats, base, parts)
+    frames = {c: timeline(durations[c[1]:c[2]], fps, intro, outro)[3] for c in cuts}
+    n_parts = sum(c[3] is not None for c in cuts)
+    print(f"  {len(scenes)} scenes, parallax on {parallax}"
+          f"{f'; the vertical video is a series of {n_parts} Shorts' if n_parts else ''}")
+    secs = sum(frames[c] * load_speed()[0][c[0]] for c in cuts)
+    print(f"Remotion render: {sum(frames.values())} frames in all; estimated ~{minutes(secs)} "
+          f"({'measured on this PC' if load_speed()[1] else 'first-run guess; the next estimate uses your real speed'}, "
           f"{concurrency()} parallel frames)")
 
     print("Bundling the Remotion project...")
     bundle = rwork / "bundle"
     npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={bundle}", "--log=error", capture=True)
 
-    full_audio = timeline_audio(narration, lead / fps, total / fps, rwork)
+    starts = [sum(durations[:i]) for i in range(len(scenes) + 1)]  # where each scene starts in the narration
     outs = []
-    for fmt in formats:
-        props = rwork / f"props_{fmt}.json"
-        props.write_text(json.dumps(build_props(fmt, scenes, assets[fmt], moves[fmt], lengths, bounds, total, lines[fmt],
-                                                places_[fmt], args),
+    for cut in cuts:
+        fmt, a, b, part, out = cut
+        name = f"{fmt}_part{part[0]}" if part else fmt
+        sub = scenes[a:b]
+        c_lead, c_lengths, c_bounds, c_total = timeline(durations[a:b], fps, intro, outro)
+        places_ = place_props(sub, script, c_bounds, fps, fmt, first=a)
+        lines = caption_layouts(shift_chunks(chunks, starts[a], starts[b]) if chunks else chunks, sub, script, [fmt],
+                                args, fps, c_lead, c_bounds, {fmt: map_blocks(places_, fmt)}, first=a)[fmt]
+        voice = narration if (a, b) == (0, len(scenes)) else cut_audio(narration, starts[a], starts[b],
+                                                                       rwork / f"narration_{name}.wav")
+        audio = timeline_audio(voice, c_lead / fps, c_total / fps, rwork, f"timeline_{name}.wav")
+        props = rwork / f"props_{name}.json"
+        props.write_text(json.dumps(build_props(fmt, sub, assets[fmt][a:b], moves[fmt][a:b], c_lengths, c_bounds,
+                                                c_total, lines, places_, args, part=part),
                                     ensure_ascii=False), encoding="utf-8")
-        silent = rwork / f"{fmt}_silent.mp4"
+        silent = rwork / f"{name}_silent.mp4"
         w, h = mv.FORMATS[fmt]["size"]
-        print(f"Rendering {fmt} ({w}x{h}) with Remotion...")
+        label = f"{fmt} part {part[0]} of {part[1]} (scenes {a + 1}-{b})" if part else fmt
+        print(f"Rendering {label} ({w}x{h}) with Remotion...")
         t0 = time.time()
         npx("remotion", "render", bundle, "Main", silent, f"--props={props}", "--codec=h264", "--crf=18",
             "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
-        save_speed(fmt, (time.time() - t0) / total)
-        out = base.with_name(f"{base.name}_{fmt}.mp4")
-        print(f"  {fmt}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
-        outs.append(mv.mux(silent, full_audio, args, out, cwd=rwork, video_codec=["-c:v", "copy"]))
+        save_speed(fmt, (time.time() - t0) / c_total)
+        print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
+        outs.append(mv.mux(silent, audio, args, out, cwd=rwork, video_codec=["-c:v", "copy"]))
     return outs, lead / fps, total / fps
 
 
-def timeline_audio(narration, lead, total, work):
+def timeline_audio(narration, lead, total, work, name="narration_timeline.wav"):
     """The narration placed on the final timeline: silence for the intro, then the voice, padded to the outro's end."""
-    out = work / "narration_timeline.wav"
+    out = work / name
     ms = round(lead * 1000)
     mv.run(["ffmpeg", "-y", "-i", narration, "-af", f"adelay={ms}|{ms},apad", "-t", f"{total:.3f}", out])
     return out

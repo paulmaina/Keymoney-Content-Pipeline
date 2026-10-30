@@ -5,7 +5,82 @@ import {BRAND, FONT, outline} from './theme';
 const clamp = {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'} as const;
 
 // "Thanks for watching", then a Subscribe button that a cursor clicks. About 3.5 seconds.
-export const Outro: React.FC<{channel: string}> = ({channel}) => {
+// In a Shorts series every part but the last says "Watch Part N" instead (next = N).
+export const Outro: React.FC<{channel: string; next?: number | null}> = ({channel, next}) => {
+  if (next) {
+    return <NextPart channel={channel} next={next} />;
+  }
+  return <Subscribe channel={channel} />;
+};
+
+const NextPart: React.FC<{channel: string; next: number}> = ({channel, next}) => {
+  const frame = useCurrentFrame();
+  const {width, height, fps} = useVideoConfig();
+  const size = Math.min(width, height) * 0.075;
+  const upNext = spring({frame: frame - 4, fps, config: {damping: 14}});
+  const card = spring({frame: frame - 0.35 * fps, fps, config: {damping: 10, stiffness: 140}});
+  const bounce = Math.abs(Math.sin((frame / fps) * Math.PI * 1.6)) * size * 0.35;
+  return (
+    <AbsoluteFill style={{background: `radial-gradient(circle at 50% 35%, ${BRAND.nightLight}, ${BRAND.night})`, alignItems: 'center', justifyContent: 'center'}}>
+      <div
+        style={{
+          position: 'absolute',
+          top: height * 0.5 - size * 3.2,
+          fontFamily: FONT,
+          fontWeight: 700,
+          fontSize: size * 0.7,
+          color: BRAND.white,
+          letterSpacing: '0.08em',
+          textShadow: outline(size / 24),
+          opacity: upNext,
+          translate: `0px ${(1 - upNext) * size}px`,
+        }}
+      >
+        UP NEXT
+      </div>
+      <div
+        style={{
+          padding: `${size * 0.35}px ${size * 0.9}px`,
+          borderRadius: size,
+          background: BRAND.yellow,
+          fontFamily: FONT,
+          fontWeight: 700,
+          fontSize: size * 1.05,
+          color: BRAND.night,
+          scale: String(card),
+          boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+        }}
+      >
+        Watch Part {next}
+      </div>
+      {/* swipe up: Shorts move to the next video with an upward swipe */}
+      <svg
+        width={size * 1.2}
+        height={size * 1.2}
+        viewBox="0 0 24 24"
+        style={{position: 'absolute', top: height * 0.5 + size * 1.5 - bounce, opacity: interpolate(frame, [0.8 * fps, 1.1 * fps], [0, 1], clamp)}}
+      >
+        <path d="M12 3 L20 12 L15 12 L15 21 L9 21 L9 12 L4 12 Z" fill={BRAND.white} stroke="#000" strokeWidth="1" />
+      </svg>
+      <div
+        style={{
+          position: 'absolute',
+          top: height * 0.5 + size * 3.1,
+          fontFamily: FONT,
+          fontWeight: 700,
+          fontSize: size * 0.55,
+          color: BRAND.yellow,
+          textShadow: outline(2),
+          opacity: interpolate(frame, [0.8 * fps, 1.2 * fps], [0, 1], clamp),
+        }}
+      >
+        {channel}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const Subscribe: React.FC<{channel: string}> = ({channel}) => {
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const unit = Math.min(width, height);

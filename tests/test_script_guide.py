@@ -4,6 +4,7 @@ from pathlib import Path
 
 import make_video as mv
 import script_check
+import shorts
 import youtube_meta
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,11 +28,29 @@ def test_template_passes_check_with_no_flags_or_notes(tmp_path):
 def test_template_follows_the_guide_s_standard(tmp_path):
     a = check(tmp_path, "--engine", "chatterbox", "--rate", "+5%")
     rows = a["rows"]
-    assert 15 <= len(rows) <= 17 and 400 <= a["words"] <= 430
-    assert a["total_seconds"] <= 170  # 2:50, so the vertical video stays a Short with the intro and outro
-    assert all(r["description"] for r in rows) and 4 <= sum(r["video"] for r in rows) <= 5
-    assert a["estimates"]["neurons_total"] < 10_000
+    minutes = a["video_seconds"] / 60
+    assert 8 <= minutes <= 10.5  # an 8-10 minute main video
+    assert 6 <= len(rows) / minutes <= 8  # 6-8 scenes a minute
+    assert all(r["description"] for r in rows)
+    lo, hi = script_check.video_range(len(rows))
+    assert lo <= sum(r["video"] for r in rows) <= hi
     assert mv.parse_characters(TEMPLATE) == {"Smart Village Boy": HOST.split(" = ", 1)[1]}
+
+
+def test_template_s_shorts_cut_only_at_chapter_headings(tmp_path):
+    a = check(tmp_path)
+    parts, seconds = a["parts"], [r["seconds"] for r in a["rows"]]
+    starts = shorts.chapter_starts(mv.parse_sections(TEMPLATE))
+    assert len(parts) >= 3 and all(x in starts for x, _ in parts[1:])
+    assert all(shorts.part_seconds(seconds[x:y]) <= shorts.LIMIT for x, y in parts)
+
+
+def test_template_s_cloudflare_days_match_the_guide(tmp_path):
+    a = check(tmp_path, "--check-images")
+    est = a["estimates"]
+    assert est["days"] == -(-int(est["neurons_total"]) // 10_000) and est["days"] >= 2
+    per_scene = (est["neurons_total"] - est["neurons_meta"]) / len(a["rows"])
+    assert 360 <= per_scene <= 420  # the guide's ~390 neurons a scene
 
 
 def test_template_chapters_title_and_places():
