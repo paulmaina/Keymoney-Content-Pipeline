@@ -25,7 +25,9 @@ import make_video as mv
 
 META_MODEL = ai_visuals.METADATA_MODEL
 META_TOKENS = 450  # max reply tokens; the estimate assumes all of them
-MAX_NARRATION = 6000  # characters of narration sent to the model
+MAX_NARRATION = 12000  # characters of narration sent to the model (a 10-minute script is ~8,000)
+SHORT_TITLE_MAX = 70  # a Short's title with its "(Part 2/5)": phones show more of a Short's title than a video's
+FULL_LINK = "FULL_VIDEO_LINK"  # replaced by hand once the full video is uploaded
 TITLE_MAX = 59  # under 60 characters, so phones don't cut them off
 TITLE_MIN = 20
 CLAUSE_BREAK = re.compile(r"[,;:(–—|]| (?:that|which|who|where|when|so|because|but) ", re.I)
@@ -531,9 +533,10 @@ def generated_picture(scenes, providers, style):
 
 # ---------- entry point ----------
 
-def write(scenes, script, base, args, work, total, lead_in=0.0):
+def write(scenes, script, base, args, work, total, lead_in=0.0, parts=None):
     """Write <base>_youtube.md and <base>_thumbnail.jpg. Returns both paths. total is the video's length and
-    lead_in the seconds before the narration starts (the Remotion intro), which the first chapter covers."""
+    lead_in the seconds before the narration starts (the Remotion intro), which the first chapter covers.
+    parts [(first, end)]: the vertical Shorts series, which gets a section per part (titles, description, tags)."""
     channel = args.channel
     sections = mv.parse_sections(script)
     if len(sections) != len(scenes):
@@ -575,7 +578,66 @@ def write(scenes, script, base, args, work, total, lead_in=0.0):
                            base.with_name(base.name + "_thumbnail.jpg"))
     desc = description(meta, chaps, scenes, channel)
     md = base.with_name(base.name + "_youtube.md")
-    md.write_text(markdown(base.name, meta, desc, chaps, thumb, total, notes), encoding="utf-8")
+    text = markdown(base.name, meta, desc, chaps, thumb, total, notes)
+    if parts:
+        import shorts
+        text += shorts_markdown(base, [part_meta(scenes, script, sections, parts, k, channel, providers,
+                                                 shorts.branding_of(args))
+                                       for k in range(1, len(parts) + 1)], meta["titles"][0])
+    md.write_text(text, encoding="utf-8")
     if providers:
         providers.report()
     return md, thumb
+
+
+# ---------- the vertical Shorts series ----------
+
+def part_meta(scenes, script, sections, parts, k, channel, providers=None, branding=True):
+    """Titles, description and tags for part k of the Shorts series: its own call to the text model (when Cloudflare
+    is set up), checked against that part's narration only. No chapters; the description links to the full video."""
+    import shorts
+    a, b = parts[k - 1]
+    n = len(parts)
+    sub = scenes[a:b]
+    labels = []
+    for label in sections[a:b] if len(sections) == len(scenes) else []:
+        if label and (not labels or section_key(label) != section_key(labels[-1])):
+            labels.append(label)
+    part_chaps = [(0, chapter_title(label)) for label in labels]
+    base = fallback(script, sub, part_chaps, channel)
+    reply = {}
+    if providers:
+        msgs = messages(sub, part_chaps, channel)
+        print(f"  Short {k} of {n}: one {providers.text_model} call, ~{estimate(providers.text_model, msgs):.0f} neurons")
+        reply = parse_reply(providers.text(msgs, max_tokens=META_TOKENS))
+    meta = merge(reply, base, " ".join([channel, *(s["text"] for s in sub)]))
+    suffix = f" (Part {k}/{n})"
+    titles = dedupe([shorten(t, SHORT_TITLE_MAX - len(suffix)) + suffix for t in meta["titles"]])
+    follow = f"Part {k} of {n}. Watch the full video: {FULL_LINK}" + (f"\nNext: Part {k + 1}." if k < n else "")
+    import stock
+    lines = [meta["hook"], meta["summary"], follow, ai_line(sub), stock.credits(sub),
+             " ".join(dedupe([*meta["hashtags"], "#Shorts"]))]
+    secs = shorts.part_seconds([s["dur"] for s in sub], branding)
+    return {"k": k, "n": n, "scenes": (a + 1, b), "titles": titles, "tags": meta["tags"],
+            "description": "\n\n".join(x for x in lines if x), "chapters": [chapter_title(l) for l in labels],
+            "seconds": secs, "from_model": bool(reply)}
+
+
+def shorts_markdown(base, metas, full_title):
+    import shorts
+    n = len(metas)
+    out = ["", f"## Shorts series: {n} parts", "",
+           f"The vertical video is split into {n} Shorts at scene boundaries (each under 3 minutes). Upload the full "
+           f"video (\"{full_title}\") first, then in each Short's description replace {FULL_LINK} with its link, and "
+           "in YouTube Studio set the full video as the Short's **Related video**. Upload the parts in order.", ""]
+    for m in metas:
+        path = shorts.part_path(base, m["k"])
+        out += [f"### Part {m['k']} of {n}: `{path.name}`", "",
+                f"Scenes {m['scenes'][0]}-{m['scenes'][1]}, about {timestamp(m['seconds'])}"
+                f"{' (' + ', '.join(m['chapters']) + ')' if m['chapters'] else ''}. "
+                f"{'Written by the Workers AI text model' if m['from_model'] else 'Built from the script (no AI)'}.",
+                "", "Titles:", ""]
+        out += [f"{i}. {t} ({len(t)} characters)" for i, t in enumerate(m["titles"], 1)]
+        out += ["", "Description:", "", "```text", m["description"], "```", "",
+                f"Tags ({len(m['tags'])}):", "", "```text", ", ".join(m["tags"]), "```", ""]
+    return "\n".join(out)

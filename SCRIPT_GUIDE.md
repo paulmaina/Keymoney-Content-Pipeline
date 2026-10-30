@@ -1,7 +1,7 @@
 # Smart Village Boy script standard
 
 How to write a script for the AI Video Editor (`make_video.py`). A script written to this standard renders into a narrated,
-captioned horizontal video and a vertical Short with no hand fixes. Every rule here matches what the tool's parser and
+captioned full-length horizontal video (8–10 minutes or longer) and a numbered series of vertical Shorts, with no hand fixes. Every rule here matches what the tool's parser and
 `--check` actually do. The example at the end is `Scripts/TEMPLATE.txt`, and a test checks that it still passes `--check`
 with no flags, so the guide stays accurate when the tool changes.
 
@@ -85,7 +85,9 @@ line that doesn't start with `#` is spoken aloud and captioned, word for word.
 ```
 
 - `[video]` at the very start of a narration line gives that scene a stronger camera move. It's never spoken.
-- It doesn't make a video clip. Use it on the 4–5 most dynamic scenes: water rushing, a reveal, a bridge being crossed.
+- It doesn't make a video clip. Use it on about one scene in 6 to 12, the most dynamic ones: water rushing, a reveal, a
+  bridge being crossed. `--check` gives the range for your scene count (5–9 for a 55-scene script) and notes anything outside
+  it.
 - Tags only work at the start of a line. A bracket anywhere else is read aloud and captioned, and `--check` flags it. Never write
   `[pause]`, `[music]`, `[B-roll]` and so on.
 
@@ -202,7 +204,13 @@ The channel visits the world's villages for clever, low-cost ideas, presented wi
   - Every place, name, number, date and "how it works" claim must be checkable (section 5).
   - When sources disagree, use the cautious wording: "hundreds of thousands", "for centuries", "can last weeks".
   - Never give health or safety advice beyond what sources support.
-- **Ending (last 2 scenes):**
+- **Every chapter opening is a hook too:**
+  - The vertical video is split automatically into Shorts of under 2:50, cut at chapter headings wherever possible. So the
+    first scene of each `# HACK` section may be the first thing a viewer sees.
+  - Make it work on its own: name the place and the problem or surprise in its first sentence ("Our third stop is Iran, home
+    to some of the driest land on Earth."). Don't open a chapter with "As we saw" or anything that needs an earlier part.
+  - End each chapter on its payoff (the result, a surprising fact), so a Short that stops there still feels complete.
+- **Ending (last 2–3 scenes):**
   - A one-line recap of all the hacks.
   - Then a call to action with a question viewers can answer in the comments ("Which of these would work where you live?") and
     "subscribe".
@@ -212,18 +220,26 @@ The channel visits the world's villages for clever, low-cost ideas, presented wi
 
 ## 4. Length and cost
 
+**No length cap.** The horizontal video uses the whole script. Plan for **8–10 minutes or longer**.
+
 **Speed.** The default voice speaks about 150–160 words a minute at the channel's +5% speed, plus a short pause after every
-scene. (This speed is still an estimate until a full narration is measured; `--check` uses the current figure.)
+scene, which comes to about **150 words and 6–8 scenes a minute** with 2–3 short sentences per scene. (The speed is still an
+estimate until a full narration is measured; `--check` uses the current figure.)
 
 | Video length | Scenes | Spoken words |
 |---|---|---|
-| 1 minute | 5–6 | about 150 |
-| 2 minutes | 11–12 | about 300 |
-| **Standard: just under 3 minutes** | **15–17** | **400–430** |
+| 5 minutes | 30–40 | about 750 |
+| **8 minutes** | **50–60** | **about 1,200** |
+| **10 minutes** | **60–75** | **about 1,500** |
+| 12 minutes | 75–90 | about 1,800 |
 
-- **The standard video is 15–17 scenes and 400–430 words,** so that `--check` estimates 2:50 or less.
-- **Hard limit for the vertical video:** the vertical video is the same length as the horizontal one, plus about 6 seconds of
-  intro and outro. YouTube Shorts must be 3 minutes or less. `--check` notes anything outside 15–20 scenes.
+- **Structure for 8–10 minutes:** a hook of 3–4 scenes, 5 hacks of 8–12 scenes each, and an ending of 2–3 scenes.
+- **Shorts are automatic:** the vertical version is the same script split into parts of under 2:50 each, including the
+  intro and outro, at scene boundaries and at chapter headings wherever possible. They're saved as
+  `<name>_vertical_part1.mp4`, `<name>_vertical_part2.mp4` and so on. Each starts with "Part 1 of N", and every part but the
+  last ends with "Watch Part 2" instead of the subscribe card. Keep each `# HACK` section under about 2:40 (around 15
+  scenes), so a chapter fits in one Short and never has to be cut in the middle. `--check` lists every part with its scenes,
+  chapters and length.
 
 **Cloudflare cost.** Images are free up to 10,000 Cloudflare "neurons" a day. Each new scene costs about **390 neurons**:
 
@@ -232,21 +248,24 @@ scene. (This speed is still an estimate until a full narration is measured; `--c
 | Image prompt | ~46 |
 | Two images (horizontal and vertical) | ~264 |
 | Two quality checks | ~81 |
-| YouTube titles and description, once per video | ~70 |
+| YouTube notes: the full video, plus one per Short (upper estimate) | ~110 + ~95 each |
 
-So a first render costs about:
+So a first render takes about:
 
-| Scenes | Neurons |
-|---|---|
-| 12 | ~4,800 |
-| 16 | ~6,300 |
-| 20 | ~7,900 |
-| 25 | ~9,800, too close to the limit |
+| Scenes | Neurons | Days of free allowance |
+|---|---|---|
+| 25 | ~10,000 | 1–2 |
+| 50 | ~20,000 | 2 |
+| 60 | ~24,000 | 3 |
+| 75 | ~30,000 | 3 |
 
+- **Several days:** when a script needs more than one day's allowance, `--check` says how many days. Run the render command
+  with `--visuals-only` once a day. Each day's images are cached, so the next day carries on where it stopped. When `--check`
+  shows 0 new images, render.
 - **Redraws:** each image that fails the quality check and is redrawn adds ~173 neurons.
 - **Stock:** scenes that end up using stock footage don't need AI images, so they cost almost nothing.
 - **Reruns:** cached scenes are free, so changing one scene's narration or Visuals line only costs that scene.
-- **Keep it under 20 scenes,** so one day's allowance covers a first render plus a few redraws.
+- **To save neurons:** `--no-check-images` drops the checks (about 310 neurons a scene).
 
 
 ## 5. Fact-check checklist
@@ -273,9 +292,13 @@ In the editor's project, the fact-check skill writes `Research/<script>_factchec
 
 ## 6. Example script (`Scripts/TEMPLATE.txt`)
 
-This exact text is in `Scripts/TEMPLATE.txt` and passes `--check` with no flags or notes: 16 scenes, about 430 words, about 2:49,
-4 `[video]` scenes, 7 chapters and about 6,200 neurons. The facts were chosen from well-documented examples, but **fact-check
-them (section 5) before using this script for a real video**.
+This exact text is in `Scripts/TEMPLATE.txt` and passes `--check` with no flags or notes:
+- 55 scenes and about 1,220 words, so about 8:09 with the intro and outro
+- 7 `[video]` scenes and 7 chapters
+- a vertical series of 4 Shorts, cut only at chapter headings
+- about 21,900 neurons, which is 3 days of Cloudflare allowance
+The facts were chosen from well-documented examples, but **fact-check them (section 5) before using this script
+for a real video**.
 
 ```text
 # Five Village Water Hacks That Beat Drought
@@ -283,55 +306,173 @@ them (section 5) before using this script for a real video**.
 # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
 
 # HOOK - Visuals: Smart Village Boy kneeling on a cracked, dry riverbed in rural Kenya at sunrise, holding up a handful of damp sand in one open palm.
-[video] This river has been dry for months. Yet dig into the sand and you find water. Today we visit five villages that have learned to catch every drop.
+[video] This river has been dry for months. Yet dig into the sand, and you find water.
+
+# Visuals: A wide view of a dry, sandy riverbed winding between thorny bushes and acacia trees in rural Kenya under a hazy morning sky.
+Around the world, billions of people live with water shortages for at least part of every year. Most of them will never see a big dam or a water factory.
 
 # Visuals: Smart Village Boy standing beside a large wooden globe on a Kenyan hilltop at sunrise, pointing at one of five small blue pins stuck into it.
-Welcome to Smart Village Boy, where we explore the cleverest ideas from the world's villages. Stay to the end for a pot that waters plants by itself.
+So villages found their own answers. Today we visit five of them, and every one of them still works.
 
-# HACK 1 KENYA - Visuals: A wide seasonal riverbed of pale sand in Kitui, Kenya, in the dry season, with a low concrete wall built straight across it and acacia trees on the banks.
+# Visuals: Smart Village Boy turning the wooden globe slowly with one hand on the Kenyan hilltop in the early morning light.
+Welcome to Smart Village Boy, where we explore the cleverest ideas from the world's villages. Stay to the end for a clay pot that waters plants by itself.
+
+# HACK 1 KENYA - Visuals: A wide seasonal riverbed of pale sand in Kitui, Kenya, in the dry season, with acacia trees on the banks and a herd of goats crossing it.
 # location: Kitui, Kenya
-In the dry hills of eastern Kenya, many rivers flow for only a few weeks a year. So villagers build a low concrete wall straight across the riverbed.
+Our first stop is the dry hills of eastern Kenya. Here, many rivers flow for only a few weeks a year.
 
-# Visuals: Brown floodwater pouring over the low concrete wall in the Kenyan riverbed during the rainy season, with wet sand piled up behind the wall.
-[video] When the rains come, the floodwater carries sand that piles up behind the wall. The sand holds water like a sponge and shields it from the hot sun.
+# Visuals: Brown floodwater rushing down the sandy Kenyan riverbed during a heavy rainstorm, carrying branches past the acacia trees.
+[video] When the rain finally comes, it arrives all at once. Floodwater roars down the riverbed and is gone within hours.
+
+# Visuals: A group of Kenyan villagers mixing concrete with shovels beside a dry riverbed on a hot morning, with a half-built low wall behind them.
+So communities came up with a plan. Together, they build a low concrete wall straight across the riverbed, down to the solid rock beneath.
+
+# Visuals: The finished low concrete wall standing across the dry Kenyan riverbed in the afternoon sun, with the riverbank rising on either side.
+It looks like a small dam, but it isn't built to hold back a lake. It is built to catch something else.
+
+# Visuals: Floodwater pouring over the low concrete wall in the Kenyan riverbed during the rainy season, with wet sand piled up behind the wall.
+Each flood carries sand along with the water. The sand settles behind the wall, and after a few rainy seasons it fills up completely.
+
+# Visuals: Close view of a hand pressing into damp sand behind the concrete wall in the Kenyan riverbed, with water seeping into the hollow it leaves.
+Now the clever part begins. Sand holds a surprising amount of water in the tiny spaces between its grains.
+
+# Visuals: The sand-filled riverbed behind the concrete wall under the harsh midday sun in Kitui, Kenya, its surface dry and pale.
+The top layer dries out in the sun, but it acts like a blanket. The water underneath is shielded from the heat, so very little evaporates.
 
 # Visuals: Two Kenyan women filling yellow jerrycans from a hand pump beside the sand-filled riverbed on a hot afternoon.
-Months later, villagers pump filtered water from a shallow well beside it. This is a sand dam, and it keeps water flowing long after the rains have gone.
+[video] Months after the rains have gone, villagers pump water from a shallow well beside the wall. The sand even filters it on the way.
 
-# HACK 2 BURKINA FASO - Visuals: An elderly farmer in a long robe and a knitted cap digging a small round pit in hard, crusted earth with a short hand hoe in Burkina Faso in the dry season.
-In Burkina Faso, a farmer named Yacouba Sawadogo watched drought turn his fields into a hard crust. He revived an old farming technique called zai.
+# Visuals: A Kenyan farmer watering rows of green kale with a watering can beside the sand-filled riverbed in the late afternoon.
+This is called a sand dam. It gives families water for drinking, for their animals and for vegetable gardens through the long dry season.
+
+# Visuals: Kenyan children walking home along a dusty path at sunset, each carrying a small yellow jerrycan of water.
+And because the water is close to home, the daily walk to fetch it gets much shorter.
+
+# Visuals: An old, weathered concrete wall across a sand-filled riverbed in rural Kenya, with green bushes growing along the banks in the late afternoon.
+Built well, a sand dam can keep working for many years. Some villages now have several along the same river.
+
+# HACK 2 BURKINA FASO - Visuals: A wide view of a bare, crusted field under a hazy sky in northern Burkina Faso in the dry season, with a few scattered thorn trees.
+Now we travel west, to Burkina Faso in the Sahel. In the 1970s and 1980s, terrible droughts turned farmland here into hard, bare crust.
+
+# Visuals: Close view of a hand pouring water onto hard, crusted soil, with the water pooling and running off instead of soaking in.
+When rain fell on that crust, it couldn't soak in. It simply ran off, taking the last good soil with it.
+
+# Visuals: An elderly farmer in a long robe and a knitted cap standing at the edge of a bare field in Burkina Faso at dawn, leaning on a short hand hoe.
+A farmer named Yacouba Sawadogo refused to give up his land. He turned to an old farming technique called zai, and made it better.
+
+# Visuals: The elderly farmer in a long robe and a knitted cap digging a small round pit in the hard, crusted earth with a short hand hoe in Burkina Faso in the dry season.
+[video] In the dry season, he dug small round pits across his field. Each one is only about as wide as a large bowl.
 
 # Visuals: Close view of a hand dropping dark compost into a small round pit in dry, cracked soil, with rows of identical pits behind it.
-Farmers dig small pits across the field and fill each one with compost. Termites come for the compost and dig tunnels that help rain soak deep into the ground.
+Into every pit went a handful of compost or manure. That makes the soil richer, but it also invites an unexpected helper.
 
-# Visuals: Green millet seedlings growing out of rows of small round pits in a once-bare field in Burkina Faso after the first rains, with young trees in the distance.
-[video] When the rains arrive, every drop stays where the seeds need it. On land where nothing grew, millet and even trees began to return.
+# Visuals: Close view of termites crawling over dark compost at the bottom of a small pit in dry soil in Burkina Faso.
+Termites come to eat the compost. As they feed, they dig tiny tunnels that break open the hard ground beneath.
+
+# Visuals: Raindrops falling into a row of small round pits in a dry field in Burkina Faso during the first storm of the rainy season.
+When the rains arrive, each pit catches the water like a cup. The termite tunnels help it sink deep into the soil, right where the seeds are.
+
+# Visuals: Green millet seedlings growing out of rows of small round pits in a once-bare field in Burkina Faso after the first rains.
+Millet and sorghum began to grow again on land that had been written off. Even tree seeds in the manure sprouted.
+
+# Visuals: The elderly farmer in a long robe and a knitted cap walking between young trees in a green forest in Burkina Faso in the late afternoon.
+Over the years, he grew a forest on land that had been bare. People came to call him the man who stopped the desert.
+
+# Visuals: Farmers in Burkina Faso sitting in the shade of a large tree at midday, listening to the elderly farmer in a long robe and a knitted cap.
+He shared what he learned with other farmers, and in 2018 he received the Right Livelihood Award for his work.
+
+# Visuals: Farmers working far apart across a wide field of small round pits in the Sahel on a hazy morning, each with a short hand hoe.
+Today, zai pits are dug by farmers across the Sahel, from Burkina Faso to Niger and Mali.
 
 # HACK 3 IRAN - Visuals: A dry desert plain in central Iran stretching toward distant brown mountains on a clear morning, with a straight line of round earth mounds crossing it.
 # media: stock
-In Iran, desert villages have drawn water from the mountains for thousands of years. The secret is a line of shafts you can spot from the air.
+Our third stop is Iran, home to some of the driest land on Earth. Yet desert towns here have had flowing water for thousands of years.
+
+# Visuals: Aerial view of a long straight line of round earth mounds crossing a desert plain in Iran in the morning, like a row of giant beads.
+From the air, you can spot the secret. Long lines of round mounds cross the desert, one after another, for kilometres.
+
+# Visuals: Close view of the dark, round opening of a shaft in the top of an earth mound in the Iranian desert, with a wooden pulley frame above it.
+Each mound marks the top of a deep vertical shaft. Far below, all the shafts connect to a single tunnel.
 
 # Visuals: A gently sloping underground tunnel of bare earth with a shallow stream of clear water flowing along its floor, lit by a beam of daylight from a shaft above.
 # media: ai
-Each shaft leads down to a gently sloping tunnel called a qanat. It carries groundwater from the mountains to the village using only gravity, and many still flow today.
+That tunnel is called a qanat. It starts under the mountains, where it taps into groundwater, and slopes gently down to the town.
 
-# HACK 4 MEGHALAYA - Visuals: Two Khasi farmers on a steep, forested hillside in Meghalaya, India, in the morning, fitting lengths of split bamboo together into a long open channel.
-In the hills of Meghalaya in India, Khasi and Jaintia farmers build water pipes from bamboo. The channels carry stream water down steep slopes to their plantations.
+# Visuals: Clear water flowing quickly along the floor of the earthen qanat tunnel, with a beam of daylight falling from a shaft above.
+[video] The slope is so gentle that the water flows at just the right speed. It needs no pumps and no fuel, only gravity.
 
-# Visuals: Clear stream water running along a narrow split bamboo channel on a green hillside in Meghalaya and falling in small drops onto the base of a betel leaf vine.
-[video] Each channel is made narrower as it goes. By the time it reaches the plants, a rushing stream has become a gentle drip right at the roots.
+# Visuals: An Iranian digger in dusty work clothes and a cloth cap standing at the bottom of a narrow shaft, holding a lamp and looking up at the circle of daylight above.
+Digging a qanat took great skill. Specialist diggers worked deep underground, using the shafts for air and to lift out the earth.
 
-# HACK 5 THE OLLA - Visuals: Smart Village Boy kneeling in a small vegetable garden in rural Kenya in the late afternoon, lowering an unglazed clay pot into a hole beside young tomato plants.
-Our last hack is one you can try at home. Bury an unglazed clay pot up to its neck beside your plants, and fill it with water.
+# Visuals: Clear water flowing out of a stone channel into a green orchard beside a mud-brick village in Iran on a hot afternoon.
+Because the water travels underground, very little is lost to the desert heat. It comes out right where people need it.
+
+# Visuals: Pomegranate trees and green fields beside a mud-brick village in the Iranian desert in the late afternoon, with brown mountains behind.
+Whole towns grew up around qanats, with orchards and fields in the middle of the desert.
+
+# Visuals: An old stone channel of clear water running through the quiet courtyard of a mud-brick house in an Iranian desert town in the morning.
+# location: none
+The idea spread far beyond Iran, to North Africa, Spain and beyond. Today the Persian qanat is a UNESCO World Heritage Site, and many still flow.
+
+# HACK 4 MEGHALAYA - Visuals: Misty green hills covered in forest in Meghalaya, India, in the early morning, with a small stream tumbling down a rocky slope.
+Next, we head to the misty hills of Meghalaya in northeast India. It is one of the wettest places on Earth, yet farming here has a water problem.
+
+# Visuals: A steep, rocky hillside in Meghalaya covered with betel leaf vines climbing up areca palm trees, under a clear winter sky.
+The hills are steep and rocky, and in the dry winter months the streams shrink. Getting water to crops on a slope is hard.
+
+# Visuals: Two Khasi farmers on a steep, forested hillside in Meghalaya in the morning, fitting lengths of split bamboo together into a long open channel.
+So Khasi and Jaintia farmers build water pipes from bamboo. They split the stems in half to make long open channels.
+
+# Visuals: A long split bamboo channel carrying clear stream water down a green hillside in Meghalaya, held up on crossed bamboo stands.
+The channels start at a stream high on the hill. They carry the water down across the slope, held up on bamboo stands.
+
+# Visuals: Clear water racing along a split bamboo channel on a steep green hillside in Meghalaya in the morning sunlight.
+[video] Along the way, the water is split into smaller and smaller channels. Each one is made narrower than the last.
+
+# Visuals: Close view of water falling in small drops from the end of a narrow bamboo channel onto the base of a betel leaf vine in Meghalaya.
+By the time it reaches the plants, a rushing stream has become a gentle drip right at the roots. Hardly a drop is wasted.
+
+# Visuals: A Khasi farmer adjusting the angle of a bamboo channel with both hands on a hillside plantation in Meghalaya in the afternoon.
+The whole system is built from local bamboo, and farmers can move and adjust it by hand. It has been used here for generations.
+
+# Visuals: Rows of healthy betel leaf vines and black pepper vines climbing trees on a terraced hillside in Meghalaya in soft evening light.
+It still waters betel leaf and black pepper plants today, proof that the simplest pipes can work beautifully.
+
+# HACK 5 THE OLLA - Visuals: Smart Village Boy holding an unglazed clay pot with both hands in a small vegetable garden in rural Kenya in the late afternoon.
+Our last hack is the one we promised, and you can try it at home. It is just a clay pot, but not an ordinary one.
+
+# Visuals: Close view of the rough, unglazed surface of a round clay pot resting on dark soil in a Kenyan garden, with tiny beads of water on its side.
+The pot is unglazed, so the clay is full of tiny pores. Water can slowly pass straight through its walls.
+
+# Visuals: Smart Village Boy kneeling in the small Kenyan vegetable garden, lowering the unglazed clay pot into a hole beside young tomato plants.
+[video] Bury the pot up to its neck beside your plants. Then fill it with water and cover the top.
 
 # Visuals: Close view of a hand pouring water from a metal jug into the open neck of a clay pot buried in dark soil beside young tomato plants in a Kenyan garden.
-The water seeps slowly through the clay, right where the roots are. Farmers have watered crops this way for centuries, and it uses much less water than a watering can.
+The water seeps out through the clay, right where the roots are. Almost none is lost to the sun or the wind.
+
+# Visuals: Close view of a flat stone lid resting on the neck of a clay pot buried in damp, dark soil beside green tomato leaves in a Kenyan garden.
+The lid keeps the water in and stops mosquitoes from breeding. Many gardeners use a flat stone or an upturned saucer.
+
+# Visuals: Young tomato plants with fresh green leaves growing around a buried clay pot in a Kenyan garden in the morning light.
+Here is the smartest part. When the soil is dry, the water seeps out faster, and when the soil is wet, it slows down.
+
+# Visuals: A gardener in a wide straw hat checking the water inside a buried clay pot in a dry vegetable garden in the morning.
+Farmers have watered crops this way for centuries, in places from North Africa to Latin America. In Spanish, the pot is called an olla.
+
+# Visuals: Smart Village Boy smiling as he fills the buried clay pot in his Kenyan garden from a small watering can at sunset.
+It can use much less water than pouring it over the soil, and you only need to refill it every few days.
+
+# Visuals: Two unglazed clay flowerpots joined rim to rim, resting on a wooden table in a Kenyan garden in the afternoon light.
+No olla nearby? Gardeners make their own from two unglazed flowerpots joined rim to rim, with the hole in one sealed.
 
 # OUTRO - Visuals: Smart Village Boy sitting beside the wooden globe on the Kenyan hilltop at sunset, smiling at the five blue pins.
-Sand that holds a river, pits that catch the rain, tunnels, bamboo pipes and a buried pot. Five ideas, and not one of them needs electricity.
+Sand that holds a river, pits that catch the rain, and tunnels that carry water under the desert.
+
+# Visuals: Smart Village Boy pointing at the blue pins on the wooden globe one by one on the Kenyan hilltop at dusk.
+Bamboo pipes that turn a stream into drops, and a buried pot that knows when to water. Not one of them needs electricity.
 
 # Visuals: Smart Village Boy waving towards the viewer on the Kenyan hilltop at dusk, with the first stars appearing above the village.
-Which of these would work where you live? Tell us in the comments, and subscribe for more village ideas.
+Which of these would work where you live? Tell us in the comments, and subscribe for more clever ideas from the world's villages.
 ```
 
 
@@ -339,16 +480,20 @@ Which of these would work where you live? Tell us in the comments, and subscribe
 
 - [ ] First line is a `# Title In Title Case`. The header block has no spoken lines and ends with a blank line.
 - [ ] Only invented characters on `# character:` lines, with the host's line copied exactly.
-- [ ] 15–17 scenes (at most 20), 400–430 words, each scene 2–3 sentences and under 60 words.
+- [ ] 8–10 minutes or longer: about 6–8 scenes and 150 words a minute. Each scene is 2–3 sentences and under 60 words.
+- [ ] Each `# HACK` section is 8–15 scenes (under about 2:40), so it fits in one Short.
 - [ ] Every scene has one `# Visuals:` line: one moment, who, what, where and when, a simple pose, no text, logos, montages,
       time-lapses or camera directions.
 - [ ] Chapter headings: `# HOOK` on scene 1, then `# HACK n PLACE` sections of 2 or more scenes, and `# OUTRO`.
-- [ ] 4–5 `[video]` tags, each at the start of a narration line. No other brackets anywhere in the narration.
+- [ ] `[video]` on about one scene in 6 to 12, each at the start of a narration line. No other brackets anywhere in the narration.
 - [ ] `# media:` and `# location:` only where needed, each on its own line.
 - [ ] Each hack's first scene names its country or region in the narration.
 - [ ] Names, places and descriptions are spelled and worded the same every time.
 - [ ] Hook opens on a problem or surprise, and the open loop pays off at the end. The ending has a recap, a question and
       "subscribe".
+- [ ] Every chapter's first scene names its place and grabs attention on its own (it may open a Short), and every chapter
+      ends on a payoff.
 - [ ] Respectful, accurate depiction of every community.
 - [ ] Fact-check list done (section 5), with sources, and anything unconfirmed softened or cut.
-- [ ] `make_video.py Scripts\<name>.txt --check` shows **Flags: none**, no notes, about 2:50 or less, and fits the day's neurons.
+- [ ] `make_video.py Scripts\<name>.txt --check` shows **Flags: none** and no notes. Its Shorts list cuts only at chapter
+      headings, and its "days of Cloudflare" line, if any, is planned for.

@@ -2,7 +2,8 @@
 
 By default both formats are rendered from one narration and one caption track:
   Exports/<name>_horizontal.mp4   1920x1080 for YouTube / Facebook
-  Exports/<name>_vertical.mp4     1080x1920 for Instagram Reels / TikTok / Shorts
+  Exports/<name>_vertical_partN.mp4  1080x1920 Shorts, the script split into parts under 2:50 (shorts.py);
+                                  a script that fits in one is a single <name>_vertical.mp4
   Exports/<name>.srt              caption file (same timings for both)
   Exports/<name>_youtube.md       title options, description with chapters, tags (--no-metadata skips)
   Exports/<name>_thumbnail.jpg    1280x720 thumbnail
@@ -516,6 +517,22 @@ def render_format(fmt, scenes, work, narration, srt, font_path, args, out):
     return mux("video.mp4", narration, args, out, cwd=fwork, filters=vf)
 
 
+def cut_parts(video, scenes, parts, base):
+    """--renderer ffmpeg: the vertical video cut into its Shorts parts at scene boundaries (re-encoded, so the cuts are
+    exact); the full-length vertical file is removed."""
+    import shorts
+    starts = [sum(s["dur"] for s in scenes[:i]) for i in range(len(scenes) + 1)]
+    outs = []
+    for k, (a, b) in enumerate(parts, 1):
+        out = shorts.part_path(base, k)
+        run(["ffmpeg", "-y", "-ss", f"{starts[a]:.3f}", "-t", f"{starts[b] - starts[a]:.3f}", "-i", video,
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+             out])
+        outs.append(out)
+    video.unlink(missing_ok=True)
+    return outs
+
+
 def mux(video, narration, args, out, cwd, filters=(), video_codec=None):
     """Video + narration (+ ducked, faded music) -> out. Both renderers finish here, so they sound the same."""
     inputs = ["-i", str(video), "-i", str(narration)]
@@ -599,6 +616,9 @@ def parse_args(argv=None):
     ap.add_argument("--text-model", default=ai_visuals.TEXT_MODEL,
                     help="Workers AI model that writes the image prompts (~50 neurons a scene)")
     ap.add_argument("--style", default="", help='appended to every image prompt, e.g. "cinematic, warm tones"')
+    ap.add_argument("--visuals-only", action="store_true",
+                    help="make and cache the prompts and images (with their checks, stock and --upscale), then stop "
+                         "before the voice and video: for scripts that need several days of Cloudflare allowance")
     ap.add_argument("--prompts-only", action="store_true",
                     help="write Exports/<name>_prompts.json for review, then stop (no images, audio or video)")
     ap.add_argument("--regenerate", action="store_true",
@@ -650,7 +670,7 @@ def parse_args(argv=None):
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
     args.redo = parse_scene_numbers(args.redo_scenes, ap)
-    args.generate_visuals |= args.prompts_only or bool(args.redo) or args.media == "stock"
+    args.generate_visuals |= args.prompts_only or args.visuals_only or bool(args.redo) or args.media == "stock"
     return args
 
 
@@ -723,6 +743,11 @@ def main():
     if args.upscale:
         import upscale
         upscale.upscale_scenes(scenes, formats)
+    if args.visuals_only:
+        missing = f" Still missing: scene(s) {', '.join(map(str, failed_visuals))}." if failed_visuals else ""
+        print(f"Visuals only: prompts and images are saved and cached; no voice or video was made.{missing} "
+              "Run the same command without --visuals-only to render.")
+        return
     work = base.parent / f".work_{base.name}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
@@ -736,14 +761,23 @@ def main():
         srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
                                     args.whisper_model, args.caption_words)
 
+    import shorts
+    parts = shorts.plan(scenes, script, args) if "vertical" in formats else []
+    if len(parts) > 1:
+        print(f"The vertical video becomes a series of {len(parts)} Shorts:")
+        for line in shorts.describe(parts, [s["dur"] for s in scenes], parse_sections(script), shorts.branding_of(args)):
+            print(f"  {line}")
     lead_in, total = 0.0, duration(narration)
     if args.renderer == "remotion":
         import remotion_render
         outs, lead_in, total = remotion_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
-                                                          base, script)
+                                                          base, script, parts)
     else:
         outs = [render_format(fmt, scenes, work, narration, srt, font_path, args,
                               base.with_name(f"{base.name}_{fmt}.mp4")) for fmt in formats]
+        if len(parts) > 1:  # the plain renderer has no intro or outro, so the parts are cut from the full video
+            outs = [o for o in outs if o.name != f"{base.name}_vertical.mp4"] + cut_parts(
+                base.with_name(f"{base.name}_vertical.mp4"), scenes, parts, base)
     if srt:  # the uploadable caption file, on the video's own timeline (after any intro)
         shift_srt(srt, lead_in, base.with_name(base.name + ".srt"))
 
@@ -751,7 +785,8 @@ def main():
     if not args.no_metadata:
         import youtube_meta
         try:
-            meta = youtube_meta.write(scenes, script, base, args, work, total, lead_in=lead_in)
+            meta = youtube_meta.write(scenes, script, base, args, work, total, lead_in=lead_in,
+                                      parts=parts if len(parts) > 1 else None)
         except Exception as e:  # the videos are done; never lose them over the upload notes
             print(f"YouTube metadata failed ({e.__class__.__name__}: {e}); the videos are fine. "
                   "Rerun with --no-metadata to skip it.")

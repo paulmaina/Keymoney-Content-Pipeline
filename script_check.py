@@ -15,7 +15,7 @@ WPM = {"edge": 135, "kokoro": 160, "chatterbox": 150}  # measured on the demo: e
 # the 2-3 sentence format: long paragraphs hold one image too long. Short fragments ("No fridge.") are fine,
 # so more than 3 sentences only counts once the paragraph is also long-ish.
 MAX_SENTENCES, MAX_WORDS, SENTENCE_WORDS = 3, 60, 40
-TARGET_SCENES = (15, 20)
+VIDEO_SHARE = (12, 6)  # [video] on about one scene in 12 to one in 6 (at least 1, and up to 5 in a short script)
 PREVIOUS_PROMPT_CHARS = 350  # a typical image prompt, passed as context to the next one
 PROMPT_OUT_TOKENS, CHECK_OUT_TOKENS = 90, 60
 # --upscale on Kaggle T4, measured on Script2 (Oct 2026): a 1.9 min session for 38 images at 1536x864 (2x),
@@ -84,10 +84,9 @@ def analyse(script, args):
         rows.append(row)
 
     n_video = sum(r["video"] for r in rows)
-    if not TARGET_SCENES[0] <= len(rows) <= TARGET_SCENES[1]:
-        notes.append(f"{len(rows)} scenes; your format aims for {TARGET_SCENES[0]}-{TARGET_SCENES[1]}")
-    if n_video and not 4 <= n_video <= 5:
-        notes.append(f"{n_video} [video] scene(s); your format aims for 4-5")
+    lo, hi = video_range(len(rows))
+    if n_video and not lo <= n_video <= hi:
+        notes.append(f"{n_video} [video] scene(s); for {len(rows)} scenes aim for {lo}-{hi}")
 
     # Cloudflare: prompts and images not already saved/cached cost neurons
     base = mv.output_base(args.output, script)
@@ -147,11 +146,36 @@ def analyse(script, args):
     est["neurons_total"] = est["neurons_prompts"] + est["neurons_images"] + est["neurons_checks"]
     if args.upscale:  # new images are always under 2048 px, so each one goes to Kaggle once
         est["upscale_todo"] += est["images_new"]
+    import shorts
+    seconds = [r["seconds"] for r in rows]
+    sections = mv.parse_sections(script)
+    branding = shorts.branding_of(args)
+    parts = shorts.split(seconds, sections, branding=branding) if args.format in ("both", "vertical") and rows else []
+    est["neurons_meta"] = 0.0 if args.no_metadata else metadata_neurons(scenes, parts, args)
+    est["neurons_total"] += est["neurons_meta"]
+    est["days"] = -(-int(est["neurons_total"]) // ai_visuals.FREE_NEURONS_PER_DAY) if est["neurons_total"] else 0
     upscale_min = (UPSCALE_SETUP_MIN + est["upscale_todo"] * UPSCALE_SEC_PER_IMAGE / 60) if est["upscale_todo"] else 0
     return {"script": script, "rows": rows, "flags": flags, "notes": notes, "sheet": sheet, "comments": comments,
             "declared": mv.parse_characters(script), "estimates": est, "upscale_minutes": upscale_min,
             "total_seconds": sum(r["seconds"] for r in rows), "words": sum(r["words"] for r in rows),
-            "prompts_path": prompts_path, "stock": stock_plan(scenes, args, base)}
+            "prompts_path": prompts_path, "stock": stock_plan(scenes, args, base),
+            "video_seconds": shorts.part_seconds(seconds, branding) if rows else 0.0, "parts": parts,
+            "part_lines": shorts.describe(parts, seconds, sections, branding) if len(parts) > 1 else []}
+
+
+def video_range(n):
+    """How many [video] scenes suit n scenes."""
+    return max(1, round(n / VIDEO_SHARE[0])), max(5, round(n / VIDEO_SHARE[1]))
+
+
+def metadata_neurons(scenes, parts, args):
+    """The YouTube notes: one text-model call for the full video and one per Short when there are several parts."""
+    import youtube_meta as ym
+    texts = [" ".join(s["text"] for s in scenes)]
+    if len(parts) > 1:
+        texts += [" ".join(s["text"] for s in scenes[a:b]) for a, b in parts]
+    return sum(text_neurons(args.metadata_model, len(ym.SYSTEM) + min(len(t), ym.MAX_NARRATION) + 200, ym.META_TOKENS)
+               for t in texts)
 
 
 def stock_plan(scenes, args, base):
@@ -181,8 +205,17 @@ def report(script, args):
     a = analyse(script, args)
     rows, est = a["rows"], a["estimates"]
     print(f"Script: {script.name}")
-    print(f"{len(rows)} scenes, {a['words']} words, about {seconds_label(a['total_seconds'])} "
+    print(f"{len(rows)} scenes, {a['words']} words, about {seconds_label(a['total_seconds'])} of narration "
           f"({args.engine} voice at {args.rate}, ~{WPM.get(args.engine, WPM['edge'])} words/min at +0%)")
+    if args.format in ("both", "horizontal"):
+        print(f"Main video (horizontal): about {seconds_label(a['video_seconds'])} with the intro and outro")
+    if a["part_lines"]:
+        print(f"Vertical: a series of {len(a['parts'])} Shorts (each under 2:50, cut at scene boundaries, at chapter "
+              "headings where possible):")
+        for line in a["part_lines"]:
+            print(f"  {line}")
+    elif a["parts"] and args.format in ("both", "vertical"):
+        print(f"Vertical: one Short of about {seconds_label(a['video_seconds'])}")
     print(f"Style: {args.style or '(none)'}")
     print()
     print("Each scene becomes: image = AI image, own file = your [visual:]; move = strong for [video] scenes")
@@ -254,9 +287,13 @@ def report(script, args):
     if args.check_images:
         print(f"  quality checks: {est['checks']} (~{est['neurons_checks']:.0f} neurons; each failed image adds a redraw "
               f"and a check, up to {ai_visuals.QC_RETRIES} times)")
+    if est["neurons_meta"]:
+        shorts_note = f", incl. {len(a['parts'])} Shorts" if len(a["parts"]) > 1 else ""
+        print(f"  YouTube notes:  ~{est['neurons_meta']:.0f} neurons{shorts_note}")
     print(f"  total about {est['neurons_total']:,.0f} of {ai_visuals.FREE_NEURONS_PER_DAY:,} free neurons a day")
-    if est["neurons_total"] > ai_visuals.FREE_NEURONS_PER_DAY:
-        print("  ! that's more than the free allowance: --image-model flux-2-klein-4b, or render one --format")
+    if est["days"] > 1:
+        print(f"  ! this needs about {est['days']} days of Cloudflare's free allowance. Run the same command with "
+              "--visuals-only once a day (each day's images are cached) until --check shows 0 new images, then render.")
     print()
     if args.upscale:
         if est["upscale_todo"]:
@@ -264,18 +301,26 @@ def report(script, args):
                   f"of the ~{KAGGLE_WEEKLY_HOURS} free GPU hours a week")
         else:
             print("Kaggle (--upscale): every image is already upscaled (cached), so no GPU time needed")
-    render_estimate(a["total_seconds"], args)
+    render_estimate(a["total_seconds"], args, [r["seconds"] for r in rows], a["parts"])
     return a
 
 
-def render_estimate(narration_seconds, args):
-    """Local render time for the chosen renderer (Remotion: from the speed measured on this PC)."""
+def render_estimate(narration_seconds, args, seconds=None, parts=()):
+    """Local render time for the chosen renderer (Remotion: from the speed measured on this PC); the vertical Shorts
+    series adds an intro and outro per part."""
     import remotion_render as rr
+    import shorts
     formats = list(mv.FORMATS) if args.format == "both" else [args.format]
     if args.renderer != "remotion":
         print(f"Render ({args.renderer}): a few minutes for {' + '.join(formats)}")
         return
-    frames = round((narration_seconds + (0 if args.no_branding else (rr.INTRO + rr.OUTRO) / mv.FPS)) * mv.FPS)
-    secs, measured = rr.estimate(frames, formats)
-    print(f"Render (remotion): ~{rr.minutes(secs)} for {' + '.join(formats)} at ~{frames} frames each "
+    seconds = seconds if seconds is not None else [narration_seconds]
+    branding = shorts.branding_of(args)
+    frames = {f: round(shorts.part_seconds(seconds, branding) * mv.FPS) for f in formats}
+    if "vertical" in frames and len(parts) > 1:
+        frames["vertical"] = sum(round(shorts.part_seconds(seconds[a:b], branding) * mv.FPS) for a, b in parts)
+    speed, measured = rr.load_speed()
+    secs = sum(n * speed[f] for f, n in frames.items())
+    print(f"Render (remotion): ~{rr.minutes(secs)} for {' + '.join(formats)} at "
+          f"{' + '.join(f'~{n} frames' for n in frames.values())} "
           f"({'measured on this PC' if measured else 'first-run guess'}), plus voice and captions")

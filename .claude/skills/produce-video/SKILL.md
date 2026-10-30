@@ -183,6 +183,14 @@ beyond them.)
   someone else's voice from a video or another TTS), `chatterbox-emotion` (0.25-2, default 0.5) and `chatterbox-cfg` (0.5;
   ~0.3 at high emotion). `.venv\Scripts\python chatterbox_tts.py` makes comparison samples in `Exports/voice_samples/`.
 - `--format vertical` or `horizontal` renders only one (and draws only that image shape); `--music <file>` adds ducked background music.
+- **No length cap; the vertical video is a Shorts series** (`shorts.py`): the horizontal video uses the whole script (plan 8-10
+  minutes), and the vertical one is split at scene boundaries into parts under 2:50 including the intro and outro, at chapter
+  headings wherever possible: `<name>_vertical_part1.mp4`, ... ("Part 1 of N" in the intro, "Watch Part 2" in every outro but
+  the last). One part only gives a plain `<name>_vertical.mp4`. `--check` lists each part's scenes and length; `_youtube.md` has
+  a section per part (Shorts titles, description with `FULL_VIDEO_LINK` to replace, tags).
+- **Several days of Cloudflare:** `--check` says how many days a script needs. Then run `--visuals-only` once a day (images are
+  cached) until `--check` shows 0 new images, and only then the full render. Don't start a full render that would run out of
+  allowance part-way, since the missing scenes would become title cards.
 
 ### Renderer (`--renderer remotion`, the default)
 `remotion_render.py` plans the video and `remotion/` (React, Remotion 4.0.535) draws it; FFmpeg mixes the audio as before.

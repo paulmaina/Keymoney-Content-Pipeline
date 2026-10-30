@@ -50,4 +50,7 @@ export type Props = {
   captions: CaptionLine[];
   captionStyle: CaptionStyle;
   places: Place[];
+  part?: Part | null; // a vertical Shorts series: "Part 1 of N" in the intro, "Watch Part N+1" in the outro
 };
+
+export type Part = {index: number; count: number};

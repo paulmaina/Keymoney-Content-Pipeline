@@ -25,11 +25,12 @@ export const Main: React.FC<Props> = (props) => {
     );
   };
   if (props.introFrames) {
-    add('Intro', props.introFrames, <Intro channel={props.channel} tagline={props.tagline} />);
+    add('Intro', props.introFrames, <Intro channel={props.channel} tagline={props.tagline} part={props.part} />);
   }
   props.scenes.forEach((s, i) => add(`Scene ${i + 1}`, s.frames, <Scene scene={s} />));
   if (props.outroFrames) {
-    add('Outro', props.outroFrames, <Outro channel={props.channel} />);
+    const next = props.part && props.part.index < props.part.count ? props.part.index + 1 : null;
+    add('Outro', props.outroFrames, <Outro channel={props.channel} next={next} />);
   }
   return (
     <AbsoluteFill style={{backgroundColor: BRAND.night}}>
