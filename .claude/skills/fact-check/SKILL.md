@@ -60,5 +60,5 @@ a university extension service) backs them.
   apply the suggested wording to the script. Only edit the script after they say yes, and then rerun
   `make_video.py <script> --check`.
 
-Fact-check before a full render: changing narration after `--export-video-job` breaks the clip-to-scene match, and
-after rendering means rendering again.
+Fact-check before a full render: changing narration after rendering means writing new prompts, drawing new images
+and rendering again.

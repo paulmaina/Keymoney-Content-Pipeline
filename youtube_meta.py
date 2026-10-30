@@ -12,7 +12,7 @@ Titles, the summary, tags and the thumbnail words come from one call to a Worker
 the default 70B); the description opens with the narration's own first lines. Without Cloudflare credentials, or when
 the reply is unusable, they're built from the script.
 The thumbnail uses the most colourful, contrasty scene picture; when every scene is a title card it draws one
-with FLUX (57.6 neurons, cached), or uses a plain background.
+with the image model (about 132 neurons with FLUX.2 klein 4B, cached), or uses a plain background.
 """
 import io
 import json
@@ -373,9 +373,15 @@ def ai_line(scenes):
     footage = [d.resolve() for d in mv.FOOTAGE_DIRS]
 
     def is_ai(s):
-        src = s.get("src")
-        return bool(s.get("clip")) or bool(src and not s["visual"] and Path(src).resolve().parent not in footage)
-    if any(map(is_ai, scenes)):  # one AI image or clip is enough to disclose it
+        if s.get("stock"):  # real footage or photos from Pexels / Pixabay
+            return False
+        src = s.get("upscaled_from") or s.get("src")  # an upscaled picture is judged by the original
+        return bool(s.get("ai")) or bool(src and not s["visual"] and Path(src).resolve().parent not in footage)
+    ai = sum(map(is_ai, scenes))
+    if ai and any(s.get("stock") for s in scenes):
+        return ("Some visuals in this video are AI-generated and the rest are stock footage and photos; "
+                "the narration is an AI voice.")
+    if ai:  # one AI image is enough to disclose it
         return "The visuals in this video are AI-generated, and the narration is an AI voice."
     return "The narration is an AI voice; this video has no AI-generated visuals."
 
@@ -384,7 +390,8 @@ def description(meta, chaps, scenes, channel):
     parts = [meta["hook"], meta["summary"]]
     if chaps:
         parts.append("Chapters:\n" + "\n".join(f"{timestamp(s)} {t}" for s, t in chaps))
-    parts += [ai_line(scenes), f"Subscribe to {channel} for more.", " ".join(meta["hashtags"])]
+    import stock
+    parts += [ai_line(scenes), stock.credits(scenes), f"Subscribe to {channel} for more.", " ".join(meta["hashtags"])]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -423,11 +430,10 @@ def striking(img):
 
 
 def scene_picture(s, work, i):
-    """A still for the scene: its image (sharper than a clip made from it), else a frame from the middle of
-    its clip or video file."""
-    if s.get("src") and Path(s["src"]).suffix.lower() in mv.IMAGE_EXT:
-        return Path(s["src"])
-    src = s.get("clip") or s.get("src")
+    """A still for the scene: its 16:9 image, else a frame from the middle of its video file."""
+    src = mv.scene_src(s, "horizontal")
+    if src and Path(src).suffix.lower() in mv.IMAGE_EXT:
+        return Path(src)
     if not src:
         return None
     src = Path(src)
@@ -503,14 +509,20 @@ def make_thumbnail(picture, text, font_path, out):
     return out
 
 
+def thumb_size(providers):
+    return "horizontal" if providers.model.sized else "square"
+
+
 def generated_picture(scenes, providers, style):
-    """A FLUX image for the thumbnail when no scene has a picture. Returns a path or None."""
+    """An AI image for the thumbnail when no scene has a picture. Returns a path or None."""
     if not providers or not providers.cf_ok:
         return None
     s = scenes[0]
-    prompt = s.get("image_prompt") or ai_visuals.full_prompt(ai_visuals.fallback_prompt(s["text"], s.get("description", "")), style)
+    size = thumb_size(providers)
+    shot = ai_visuals.fallback_prompt(s["text"], s.get("description", ""))
+    prompt = ai_visuals.full_prompt(shot, style, size)
     try:
-        path, _, _ = providers.image(prompt)
+        path, _, _ = providers.image(prompt, size=size)
     except ai_visuals.ProviderError as e:
         print(f"  thumbnail image failed ({e}); using a plain background")
         return None
@@ -519,13 +531,14 @@ def generated_picture(scenes, providers, style):
 
 # ---------- entry point ----------
 
-def write(scenes, script, base, args, work, total):
-    """Write <base>_youtube.md and <base>_thumbnail.jpg. Returns both paths."""
+def write(scenes, script, base, args, work, total, lead_in=0.0):
+    """Write <base>_youtube.md and <base>_thumbnail.jpg. Returns both paths. total is the video's length and
+    lead_in the seconds before the narration starts (the Remotion intro), which the first chapter covers."""
     channel = args.channel
     sections = mv.parse_sections(script)
     if len(sections) != len(scenes):
         sections = [None] * len(scenes)
-    chaps = chapters([s["dur"] for s in scenes], sections, total)
+    chaps = chapters([s["dur"] + (lead_in if i == 0 else 0) for i, s in enumerate(scenes)], sections, total)
     notes = {}
     if not chaps:
         notes["chapters"] = ("The script has no section headings (# HOOK, # HACK 1 ...)." if not any(sections) else
@@ -540,7 +553,8 @@ def write(scenes, script, base, args, work, total):
     if creds:
         providers = ai_visuals.Providers("cloudflare", args.image_model, args.metadata_model, creds=creds, poll_key="")
         msgs = messages(scenes, chaps, channel)
-        extra = "" if picture else f" + {ai_visuals.FLUX_NEURONS:.1f} for a thumbnail image if not cached"
+        cost = providers.model.neurons(*ai_visuals.dims(thumb_size(providers)))
+        extra = "" if picture else f" + ~{cost:.0f} for a thumbnail image if not cached"
         print(f"YouTube metadata: one {args.metadata_model} call, ~{estimate(args.metadata_model, msgs):.0f} "
               f"neurons (estimate){extra}")
         reply = parse_reply(providers.text(msgs, max_tokens=META_TOKENS))
@@ -554,7 +568,7 @@ def write(scenes, script, base, args, work, total):
         notes["thumbnail"] = f"scene {picture[1]}'s picture (the most colourful and contrasty)"
         picture = picture[0]
     elif (picture := generated_picture(scenes, providers, args.style)):
-        notes["thumbnail"] = "a FLUX image of the opening scene"
+        notes["thumbnail"] = "an AI image of the opening scene"
     else:
         notes["thumbnail"] = "a plain gradient (every scene is a title card)"
     thumb = make_thumbnail(picture, meta["thumbnail_text"], args.font.resolve(),

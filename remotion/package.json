@@ -1,0 +1,26 @@
+{
+  "name": "ai-video-editor-remotion",
+  "private": true,
+  "description": "Motion renderer for make_video.py --renderer remotion (pans, parallax, captions, map, branding)",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.535",
+    "@remotion/fonts": "4.0.535",
+    "@remotion/transitions": "4.0.535",
+    "d3-geo": "3.1.1",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.535",
+    "topojson-client": "3.1.0",
+    "world-atlas": "2.0.2"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "3.1.0",
+    "@types/react": "19.1.10",
+    "@types/topojson-client": "3.1.5",
+    "typescript": "5.9.3"
+  }
+}

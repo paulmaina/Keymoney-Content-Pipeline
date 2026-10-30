@@ -1,4 +1,4 @@
-﻿"""Turn a text script into narrated videos with burned-in captions.
+"""Turn a text script into narrated videos with burned-in captions.
 
 By default both formats are rendered from one narration and one caption track:
   Exports/<name>_horizontal.mp4   1920x1080 for YouTube / Facebook
@@ -7,12 +7,17 @@ By default both formats are rendered from one narration and one caption track:
   Exports/<name>_youtube.md       title options, description with chapters, tags (--no-metadata skips)
   Exports/<name>_thumbnail.jpg    1280x720 thumbnail
 
+Rendering (--renderer): remotion (default; remotion_render.py and remotion/) animates stills with eased pans, zooms and
+subtle parallax, crossfades, animated captions, place labels, a world map and a branded intro/outro. ffmpeg is the fast,
+simple renderer, and the fallback when Node.js isn't installed.
+
 Script format (plain .txt):
   - Each paragraph (separated by a blank line) is one scene.
-  - [video] at the start of a line makes that scene an AI video clip (Kaggle).
+  - [video] at the start of a line gives that scene a stronger camera move (for action paragraphs).
   - [visual: myclip.mp4] at the start of a line sets that scene's footage or image
     (looked up in the "Raw Footage" folder, then next to the script).
   - "# character: Name = description" declares a character for consistent AI images.
+  - "# media: ai" or "# media: stock" in a paragraph forces that scene's picture source (see --media).
   - Any other line starting with # is a comment: never spoken, captioned or used in prompts.
   Scenes without a visual reuse files from the footage folder in order,
   or fall back to a generated title card showing the scene text.
@@ -22,10 +27,7 @@ Usage:
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --format vertical --music "Raw Footage\\song.mp3"
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --engine kokoro --voice am_michael
   .venv\\Scripts\\python make_video.py Scripts\\demo.txt --generate-visuals --style "cinematic, warm tones"
-
-AI video clips (scenes with a [video] line, made on a free Kaggle GPU):
-  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --export-video-job
-  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --generate-visuals --clips clips.zip
+  .venv\\Scripts\\python make_video.py Scripts\\demo.txt --generate-visuals --upscale   (sharper images via Kaggle)
 """
 import argparse
 import asyncio
@@ -41,8 +43,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 import ai_visuals
-import kaggle_runner
-import video_job
 from download_models import MODEL_FILES, MODELS_DIR
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -107,21 +107,24 @@ CHARACTER_LINE = re.compile(r"^#\s*character\s*:\s*(.+?)\s*(?:=|:| - | – | —
 # "# HACK 1 NIGERIA - Visuals: market in harsh sun", "# Shot: ...": what the scene should show. Used in that scene's image
 # and motion prompts (never spoken or captioned). Any other '#' line is a plain comment.
 DESCRIPTION_LINE = re.compile(r"^#.*?\b(?:visuals?|shot|description)\s*:\s*\S", re.I)
+MEDIA_LINE = re.compile(r"^#\s*media\s*:\s*(ai|stock)\s*$", re.I)
 
 
 def parse_script(path):
     scenes = []
     for block in re.split(r"\n\s*\n", path.read_text(encoding="utf-8-sig")):
-        visual, lines, video, described = None, [], False, []
+        visual, lines, video, described, media = None, [], False, [], None
         for line in block.strip().splitlines():
             line = line.strip()
             if line.startswith("#"):
-                if DESCRIPTION_LINE.match(line) and not CHARACTER_LINE.match(line):
+                if (m := MEDIA_LINE.match(line)):
+                    media = m.group(1).lower()
+                elif DESCRIPTION_LINE.match(line) and not CHARACTER_LINE.match(line):
                     described.append(line.lstrip("#").strip())
                 continue  # never spoken or captioned; plain comments aren't used anywhere
             while (m := LEADING_TAG.match(line)):
                 if m.group(1):
-                    video = True  # make this scene an AI video clip (see --export-video-job)
+                    video = True  # an action scene: a stronger camera move
                 else:
                     visual = m.group(2).strip()
                 line = line[m.end():]
@@ -129,7 +132,7 @@ def parse_script(path):
                 lines.append(line)
         if lines:
             scenes.append({"text": " ".join(lines), "visual": visual, "video": video,
-                           "description": "; ".join(described)})
+                           "description": "; ".join(described), **({"media": media} if media else {})})
     return scenes
 
 
@@ -160,10 +163,12 @@ def parse_sections(path):
 
 
 def parse_comments(path):
-    """(line number, text) of every plain '#' comment the script skips: not character or description lines."""
+    """(line number, text) of every plain '#' comment the script skips: not character, description, media or
+    location lines."""
+    from places import LOCATION_LINE
+    used = (CHARACTER_LINE, DESCRIPTION_LINE, MEDIA_LINE, LOCATION_LINE)
     return [(n, line.strip()) for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1)
-            if line.strip().startswith("#") and not CHARACTER_LINE.match(line.strip())
-            and not DESCRIPTION_LINE.match(line.strip())]
+            if line.strip().startswith("#") and not any(r.match(line.strip()) for r in used)]
 
 
 def parse_characters(path):
@@ -250,16 +255,34 @@ def tts_kokoro(text, out, voice, speed):
     sf.write(str(out), samples, sr)
 
 
+def chatterbox_or_fallback(scenes, args):
+    """Chatterbox lines from Kaggle ({index: wav}), or None after switching args to the Edge fallback voice."""
+    import chatterbox_tts
+    lines = chatterbox_tts.narrate_lines(scenes, args)
+    if lines is None:
+        args.engine = "edge"
+        if not (args.voice or "").endswith("Neural"):
+            args.voice = chatterbox_tts.FALLBACK_VOICE
+        print(f"  Falling back to the Edge voice {args.voice or chatterbox_tts.FALLBACK_VOICE} for the whole video "
+              "(never two voices in one video).")
+    return lines
+
+
 def narrate(scenes, work, args):
+    made = chatterbox_or_fallback(scenes, args) if args.engine == "chatterbox" else None
+    speed = 1 + int(args.rate.rstrip("%")) / 100
     for i, s in enumerate(scenes):
         raw = work / f"vo_{i:03}.{'mp3' if args.engine == 'edge' else 'wav'}"
-        if args.engine == "edge":
+        tempo = ""
+        if made:  # Chatterbox has no speed setting, so --rate is applied afterwards (pitch kept)
+            raw = made[i]
+            tempo = f"atempo={min(2.0, max(0.5, speed)):.3f}," if abs(speed - 1) > 1e-3 else ""
+        elif args.engine == "edge":
             tts_edge(s["text"], raw, args.voice or "en-US-AriaNeural", args.rate)
         else:
-            speed = 1 + int(args.rate.rstrip("%")) / 100
             tts_kokoro(s["text"], raw, args.voice or "af_heart", speed)
         wav = work / f"vo_{i:03}_pad.wav"
-        run(["ffmpeg", "-y", "-i", raw, "-af", f"apad=pad_dur={PAUSE}", "-ar", "48000", "-ac", "2", wav])
+        run(["ffmpeg", "-y", "-i", raw, "-af", f"{tempo}apad=pad_dur={PAUSE}", "-ar", "48000", "-ac", "2", wav])
         s["dur"] = duration(wav)
         print(f"  scene {i + 1}: {s['dur']:.1f}s")
     lst = work / "audio.txt"
@@ -319,32 +342,27 @@ def title_card(text, out, w, h, font_path):
     return out
 
 
-def render_scene(i, src, dur, work, w, h):
+def render_scene(i, src, dur, work, w, h, strong=False):
     out = work / f"scene_{i:03}.mp4"
     fit = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
     if src.suffix.lower() in VIDEO_EXT:
         inp = ["-stream_loop", "-1", "-i", src]
         vf = f"{fit},fps={FPS}"
-    else:  # still image: slow Ken Burns zoom
+    else:  # still image: slow Ken Burns zoom ([video] scenes zoom further)
         frames = int(dur * FPS) + 1
+        step, top = (0.0011, 1.22) if strong else (0.0006, 1.12)
         inp = ["-loop", "1", "-framerate", str(FPS), "-i", src]
         vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
-              f"zoompan=z='min(zoom+0.0006,1.12)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2'"
+              f"zoompan=z='min(zoom+{step},{top})':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2'"
               f":d={frames}:s={w}x{h}:fps={FPS},setsar=1")
     run(["ffmpeg", "-y", *inp, "-t", f"{dur:.3f}", "-vf", vf, "-an", "-c:v", "libx264",
          "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), out])
     return out
 
 
-def render_clip(i, clip, dur, work, w, h, fill):
-    """An AI clip, upscaled with lanczos and centre-cropped, filled out to the narration length."""
-    out = work / f"scene_{i:03}.mp4"
-    fit = f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},setsar=1"
-    plan = video_job.clip_fill_plan(duration(clip), dur, fill)
-    run(["ffmpeg", "-y", "-i", clip, "-filter_complex", video_job.clip_filter(plan, fit), "-map", "[v]",
-         "-t", f"{dur:.3f}", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-         "-pix_fmt", "yuv420p", "-r", str(FPS), out])
-    return out
+def scene_src(s, fmt):
+    """The scene's picture for one format: its own 16:9 or 9:16 image when the model drew one."""
+    return (s.get("srcs") or {}).get(fmt) or s.get("src")
 
 
 # ---------- captions ----------
@@ -442,6 +460,18 @@ def write_srt(chunks, out):
     return out
 
 
+def shift_srt(srt, seconds, out):
+    """Copy an .srt to out with every cue moved later by seconds (the Remotion intro)."""
+    def move(m):
+        h, mi, s, ms = map(int, m.groups())
+        return srt_time(h * 3600 + mi * 60 + s + ms / 1000 + seconds)
+    text = srt.read_text(encoding="utf-8")
+    if seconds:
+        text = re.sub(r"(\d\d):(\d\d):(\d\d),(\d\d\d)", move, text)
+    out.write_text(text, encoding="utf-8")
+    return out
+
+
 def make_captions(audio, out, script_text, model_size, max_words):
     from faster_whisper import WhisperModel
     import numpy as np
@@ -452,7 +482,8 @@ def make_captions(audio, out, script_text, model_size, max_words):
     # no initial_prompt: feeding the script itself makes whisper skip the opening words
     segments, _ = model.transcribe(np.frombuffer(pcm, np.float32), word_timestamps=True, language="en")
     heard = [Word(w.word.strip(), w.start, w.end) for seg in segments for w in seg.words]
-    return write_srt(chunk_words(align_words(heard, script_text), max_words), out)
+    chunks = chunk_words(align_words(heard, script_text), max_words)
+    return write_srt(chunks, out), chunks
 
 
 # ---------- per-format render ----------
@@ -464,11 +495,8 @@ def render_format(fmt, scenes, work, narration, srt, font_path, args, out):
     fwork.mkdir()
     print(f"Rendering {fmt} ({w}x{h})...")
     for i, s in enumerate(scenes):
-        if s.get("clip"):
-            render_clip(i, s["clip"], s["dur"], fwork, w, h, args.clip_fill)
-            continue
-        src = s["src"] or title_card(s["text"], fwork / f"card_{i:03}.png", w, h, font_path)
-        render_scene(i, src, s["dur"], fwork, w, h)
+        src = scene_src(s, fmt) or title_card(s["text"], fwork / f"card_{i:03}.png", w, h, font_path)
+        render_scene(i, src, s["dur"], fwork, w, h, strong=bool(s.get("video")))
     (fwork / "video.txt").write_text("".join(f"file 'scene_{i:03}.mp4'\n" for i in range(len(scenes))))
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "video.txt", "-c", "copy", "video.mp4"], cwd=fwork)
 
@@ -485,22 +513,27 @@ def render_format(fmt, scenes, work, narration, srt, font_path, args, out):
                      f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,"
                      f"Shadow=0,MarginV={spec['margin']}'"]
 
-    inputs = ["-i", "video.mp4", "-i", str(narration)]
+    return mux("video.mp4", narration, args, out, cwd=fwork, filters=vf)
+
+
+def mux(video, narration, args, out, cwd, filters=(), video_codec=None):
+    """Video + narration (+ ducked, faded music) -> out. Both renderers finish here, so they sound the same."""
+    inputs = ["-i", str(video), "-i", str(narration)]
     if args.music:
         inputs += ["-stream_loop", "-1", "-i", str(args.music)]
         audio = ["-filter_complex", music_filter(duration(narration), args.music_volume),
                  "-map", "0:v", "-map", "[a]"]
     else:
         audio = ["-map", "0:v", "-map", "1:a"]
-    run(["ffmpeg", "-y", *inputs, *audio, *vf, "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
-         str(out)], cwd=fwork)
+    codec = video_codec or ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
+    run(["ffmpeg", "-y", *inputs, *audio, *filters, *codec, "-c:a", "aac", "-b:a", "192k", "-shortest",
+         "-movflags", "+faststart", str(out)], cwd=cwd)
     return out
 
 
 # ---------- main ----------
 
-PATH_OPTIONS = {"font", "music", "output"}
+PATH_OPTIONS = {"font", "music", "output", "chatterbox_voice"}
 
 
 def load_config(ap):
@@ -535,21 +568,36 @@ def parse_args(argv=None):
     ap.add_argument("--format", choices=["both", *FORMATS], default="both",
                     help="which video(s) to render (default: both)")
     ap.add_argument("--vertical", action="store_true", help=argparse.SUPPRESS)  # deprecated
-    ap.add_argument("--engine", choices=["edge", "kokoro"], default="edge",
-                    help="edge = Microsoft neural voices (online); kokoro = fully offline")
+    ap.add_argument("--engine", choices=["edge", "kokoro", "chatterbox"], default="edge",
+                    help="edge = Microsoft neural voices (online); kokoro = fully offline; chatterbox = Chatterbox on a "
+                         "free Kaggle GPU (needs KAGGLE_API_TOKEN; falls back to Edge Emma if Kaggle fails)")
+    ap.add_argument("--chatterbox-voice", type=Path,
+                    help="chatterbox: a reference clip (6-15 s of clean speech) to speak in that voice, only one you have "
+                         "the right to use; default: Chatterbox's built-in voice")
+    ap.add_argument("--chatterbox-emotion", type=float, default=0.5,
+                    help="chatterbox: emotion / exaggeration, 0.25 (flat) to 2.0 (theatrical); default 0.5")
+    ap.add_argument("--chatterbox-cfg", type=float, default=0.5,
+                    help="chatterbox: lower (~0.3) keeps the pace natural at high emotion; default 0.5")
     ap.add_argument("--voice", help="edge default en-US-AriaNeural; kokoro default af_heart")
     ap.add_argument("--rate", default="+0%", help="speaking rate, e.g. +10%% or -5%%")
     ap.add_argument("--music", type=Path, help="background music, ducked under the voice and faded out")
     ap.add_argument("--music-volume", type=float, default=0.2, help="music level between sentences")
     ap.add_argument("--font", type=Path, default=DEFAULT_FONT,
                     help="TTF/OTF for captions and title cards (default: bundled Noto Sans Bold)")
-    ap.add_argument("--generate-visuals", action="store_true",
-                    help="AI images for scenes without a [visual:] line (see --image-provider)")
+    # on/off options you may set in make_video.toml also get a --no-... form to turn them off for one run
+    on_off = argparse.BooleanOptionalAction
+    ap.add_argument("--generate-visuals", action=on_off, default=False,
+                    help="AI images (or stock, see --media) for scenes without a [visual:] line (see --image-provider)")
+    ap.add_argument("--media", choices=["mixed", "stock", "ai"], default="mixed",
+                    help="with --generate-visuals: mixed = Pexels/Pixabay footage or photos where one matches well, "
+                         "else AI images (default); stock = stock wherever anything relevant exists; ai = never stock. "
+                         "'# media: ai' / '# media: stock' lines force a scene. --media stock turns on --generate-visuals")
+    ap.add_argument("--stock", choices=["auto", "pexels", "pixabay"], default="auto",
+                    help="stock provider: auto = every one with a key in .env (PEXELS_API_KEY, PIXABAY_API_KEY)")
     ap.add_argument("--image-provider", choices=ai_visuals.PROVIDERS, default="auto",
-                    help="auto = Cloudflare, then Pollinations once Cloudflare's daily allowance is used up; "
-                         "kaggle = images made by the Kaggle notebook and imported with --clips")
+                    help="auto = Cloudflare, then Pollinations once Cloudflare's daily allowance is used up")
     ap.add_argument("--text-model", default=ai_visuals.TEXT_MODEL,
-                    help="Workers AI model that writes image and motion prompts")
+                    help="Workers AI model that writes the image prompts (~50 neurons a scene)")
     ap.add_argument("--style", default="", help='appended to every image prompt, e.g. "cinematic, warm tones"')
     ap.add_argument("--prompts-only", action="store_true",
                     help="write Exports/<name>_prompts.json for review, then stop (no images, audio or video)")
@@ -558,23 +606,31 @@ def parse_args(argv=None):
     ap.add_argument("--new-images", action="store_true",
                     help="keep the saved prompts but draw every image again with a new random seed "
                          "(the new images replace the cached ones)")
-    ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL, help="Workers AI image model ID")
-    ap.add_argument("--video-scenes", default="",
-                    help='scene numbers to make into AI video clips, e.g. "3,7,12" (same as a [video] line)')
-    ap.add_argument("--export-video-job", action="store_true",
-                    help="write Exports/<name>_video_job.zip for the Kaggle notebook, then stop")
-    ap.add_argument("--clips", type=Path, help="clips.zip (or its folder) downloaded from the Kaggle notebook")
-    ap.add_argument("--clip-fill", choices=video_job.FILL_MODES, default="pingpong",
-                    help="how a clip shorter than its narration fills the scene (default: pingpong)")
-    ap.add_argument("--kaggle-video", action="store_true",
-                    help="the one-command route: AI images for every scene, Kaggle clips for [video] scenes "
-                         "(skipped if there are none), then render (Kaggle needs KAGGLE_API_TOKEN in .env)")
-    ap.add_argument("--kaggle-resume", action="store_true",
-                    help="continue an interrupted --kaggle-video run without redoing finished clips")
-    ap.add_argument("--kaggle-size", choices=list(video_job.VIDEO_SIZES), default="960x544",
-                    help="Wan 2.2 clip size on Kaggle (default 960x544, which fits a T4; 1280x704 is full 720p)")
-    ap.add_argument("--kaggle-hours", type=float,
-                    help="hard time limit per Kaggle run (default: ~45 min + 1.5 h per clip, at most 12)")
+    ap.add_argument("--redo-scenes", default="", metavar='"3,7"',
+                    help="draw only these scenes' images again with a new seed; every other scene keeps its cached "
+                         "images and prompts (turns on --generate-visuals)")
+    ap.add_argument("--check-images", action=on_off, default=False,
+                    help="look at every AI image with a Cloudflare vision model for extra or missing limbs, fingers or "
+                         "faces and stray text; failures are redrawn with a new seed up to 2 times, then the best is kept "
+                         "and flagged (~40 neurons a check)")
+    ap.add_argument("--vision-model", default=ai_visuals.VISION_MODEL, help="Workers AI model for --check-images")
+    ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL,
+                    help="Workers AI image model: a short name (" + ", ".join(ai_visuals.IMAGE_MODELS) +
+                         ") or a full @cf/... ID (default flux-2-klein-4b, ~132 neurons an image, one per format)")
+    ap.add_argument("--upscale", action=on_off, default=False,
+                    help="sharpen scene images under 2048 px with Real-ESRGAN on a free Kaggle GPU, in one batch "
+                         "(results are cached; needs KAGGLE_API_TOKEN in .env)")
+    ap.add_argument("--renderer", choices=["remotion", "ffmpeg"], default="remotion",
+                    help="remotion = eased pans and zooms, 2.5D parallax, crossfades, animated captions, place labels, "
+                         "a world map and a branded intro/outro (needs Node.js; slower); ffmpeg = simple zooms, fast. "
+                         "Falls back to ffmpeg when Node.js is missing")
+    ap.add_argument("--no-branding", action="store_true", help="remotion: leave out the channel intro and outro")
+    ap.add_argument("--no-parallax", action="store_true",
+                    help="remotion: plain pans and zooms only (skips the depth model, ~1 s per image)")
+    ap.add_argument("--caption-style", choices=["auto", "bold", "clean", "minimal"], default="auto",
+                    help="remotion captions: bold = big words popping in 2-4 at a time; clean = one or two calm lines "
+                         "with the spoken word highlighted; minimal = a small plain line. auto (default) = bold for "
+                         "vertical, clean for horizontal")
     ap.add_argument("--no-captions", action="store_true")
     ap.add_argument("--whisper-model", default="base", help="tiny/base/small/medium")
     ap.add_argument("--caption-words", type=int, default=6, help="max words per caption line")
@@ -586,20 +642,24 @@ def parse_args(argv=None):
     ap.add_argument("--channel", default="Smart Village Boy", help="channel name used in the YouTube metadata")
     ap.add_argument("--keep-work", action="store_true", help="keep intermediate files")
     ap.add_argument("--check", action="store_true",
-                    help="check the script and estimate length, Cloudflare neurons and Kaggle GPU time, then stop "
+                    help="check the script and estimate length, Cloudflare neurons and render time, then stop "
                          "(no audio, images or network)")
     ap.set_defaults(**load_config(ap))
     args = ap.parse_args(argv)
     if args.vertical:
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
-    args.generate_visuals |= args.prompts_only
-    args.kaggle_video |= args.kaggle_resume
-    if args.kaggle_video:
-        if args.clips or args.export_video_job:
-            ap.error("--kaggle-video downloads its own clips; don't combine it with --clips or --export-video-job")
-        args.generate_visuals = True  # the scenes around the clips need their still images
+    args.redo = parse_scene_numbers(args.redo_scenes, ap)
+    args.generate_visuals |= args.prompts_only or bool(args.redo) or args.media == "stock"
     return args
+
+
+def parse_scene_numbers(text, ap=None):
+    """{0-based index} from "3,7" (1-based, as --check and the log number scenes)."""
+    try:
+        return {int(n) - 1 for n in re.split(r"[,\s]+", text.strip()) if n} if text.strip() else set()
+    except ValueError:
+        (ap.error if ap else sys.exit)(f'--redo-scenes expects scene numbers like "3,7", got "{text}"')
 
 
 def main():
@@ -621,53 +681,48 @@ def main():
             sys.exit(f"Music file not found: {args.music}")
     if args.engine == "kokoro":
         check_kokoro_model()
+    if args.renderer == "remotion":
+        import remotion_render
+        ok, why = remotion_render.available()
+        if not ok:
+            print(f"Note: the Remotion renderer isn't available ({why}); using --renderer ffmpeg.")
+            args.renderer = "ffmpeg"
 
     scenes = parse_script(script)
     if not scenes:
         sys.exit("Script has no text.")
-    video_job.apply_video_scenes(scenes, video_job.parse_scene_numbers(args.video_scenes))
-    assign_visuals(scenes, script.parent, use_pool=not (args.generate_visuals or args.export_video_job))
+    assign_visuals(scenes, script.parent, use_pool=not args.generate_visuals)
 
     base = output_base(args.output, script)
     base.parent.mkdir(parents=True, exist_ok=True)
-    providers = None
-    if args.generate_visuals or args.export_video_job:
-        providers = ai_visuals.Providers(args.image_provider, args.image_model, args.text_model,
-                                         new_images=args.new_images)
-    if args.export_video_job:
-        video_job.export_job(scenes, base, providers, style=args.style, regenerate=args.regenerate,
-                             video_size=args.kaggle_size, characters=parse_characters(script))
-        return
-    video_scenes = [i + 1 for i, s in enumerate(scenes) if s.get("video") and not s["visual"]]
-    if args.kaggle_video and not video_scenes:
-        # one command for every script: the [video] tags decide whether Kaggle is needed
-        print("No [video] scenes in this script, so nothing goes to Kaggle: making images and rendering locally.")
-    elif args.kaggle_video:
-        print(f"Video scenes {', '.join(map(str, video_scenes))} go to Kaggle; the rest get AI images.")
-        args.clips = kaggle_runner.run(scenes, base, providers, style=args.style, resume=args.kaggle_resume,
-                                       hours=args.kaggle_hours, video_size=args.kaggle_size,
-                                       characters=parse_characters(script))
-        if args.clips is None:
-            return
-
-    if args.clips:
-        n_clips, n_images = video_job.import_clips(args.clips.resolve(), scenes, base.parent / f".clips_{base.name}")
-        print(f"Imported {n_clips} clip(s) and {n_images} image(s) from {args.clips}")
-        missing = [i + 1 for i, s in enumerate(scenes) if s.get("video") and not s.get("clip")]
-        if missing:
-            print(f"  no clip for scene(s) {', '.join(map(str, missing))}: they keep their still image")
+    formats = list(FORMATS) if args.format == "both" else [args.format]
     failed_visuals = []
     if args.generate_visuals:
+        if (bad := sorted(n + 1 for n in args.redo if not 0 <= n < len(scenes))):
+            sys.exit(f"--redo-scenes: there is no scene {', '.join(map(str, bad))} (the script has {len(scenes)})")
+        if (own := sorted(n + 1 for n in args.redo if scenes[n]["visual"])):
+            print(f"Note: scene(s) {', '.join(map(str, own))} use your own [visual:] file, so --redo-scenes skips them.")
+        providers = ai_visuals.Providers(args.image_provider, args.image_model, args.text_model,
+                                         new_images=args.new_images, vision_model=args.vision_model)
+        plan = {}
+        if not args.prompts_only:
+            import script_check
+            import stock
+            plan = stock.fill_stock(scenes, formats, args.media, args.stock, providers,
+                                    script_check.estimated_seconds(scenes, args), parse_characters(script))
         failed_visuals = ai_visuals.generate_scene_visuals(
-            scenes, base.with_name(base.name + "_prompts.json"), model=args.image_model,
-            style=args.style, regenerate=args.regenerate, prompts_only=args.prompts_only,
-            provider=args.image_provider, providers=providers, characters=parse_characters(script),
-            only={i for i, s in enumerate(scenes) if not s.get("clip")})
+            scenes, base.with_name(base.name + "_prompts.json"), style=args.style, regenerate=args.regenerate,
+            prompts_only=args.prompts_only, provider=args.image_provider, providers=providers,
+            characters=parse_characters(script), formats=formats, redo=args.redo, check=args.check_images)
         if args.prompts_only:
             print("Prompts only: review and edit the file above, then rerun with --generate-visuals.")
             return
+        stock.write_media_json(scenes, plan, base.with_name(base.name + "_media.json"))
     elif args.regenerate:
         print("Note: --regenerate only applies with --generate-visuals.")
+    if args.upscale:
+        import upscale
+        upscale.upscale_scenes(scenes, formats)
     work = base.parent / f".work_{base.name}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
@@ -675,22 +730,28 @@ def main():
     print(f"{len(scenes)} scenes. Generating voice over ({args.engine})...")
     narration = narrate(scenes, work, args)
 
-    srt = None
+    srt, chunks = None, None
     if not args.no_captions:
         print(f"Transcribing captions (whisper {args.whisper_model})...")
-        srt = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
-                            args.whisper_model, args.caption_words)
-        shutil.copy(srt, base.with_name(base.name + ".srt"))
+        srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
+                                    args.whisper_model, args.caption_words)
 
-    formats = list(FORMATS) if args.format == "both" else [args.format]
-    outs = [render_format(fmt, scenes, work, narration, srt, font_path, args,
-                          base.with_name(f"{base.name}_{fmt}.mp4")) for fmt in formats]
+    lead_in, total = 0.0, duration(narration)
+    if args.renderer == "remotion":
+        import remotion_render
+        outs, lead_in, total = remotion_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
+                                                          base, script)
+    else:
+        outs = [render_format(fmt, scenes, work, narration, srt, font_path, args,
+                              base.with_name(f"{base.name}_{fmt}.mp4")) for fmt in formats]
+    if srt:  # the uploadable caption file, on the video's own timeline (after any intro)
+        shift_srt(srt, lead_in, base.with_name(base.name + ".srt"))
 
     meta = None
     if not args.no_metadata:
         import youtube_meta
         try:
-            meta = youtube_meta.write(scenes, script, base, args, work, duration(narration))
+            meta = youtube_meta.write(scenes, script, base, args, work, total, lead_in=lead_in)
         except Exception as e:  # the videos are done; never lose them over the upload notes
             print(f"YouTube metadata failed ({e.__class__.__name__}: {e}); the videos are fine. "
                   "Rerun with --no-metadata to skip it.")

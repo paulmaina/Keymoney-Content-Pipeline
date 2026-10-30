@@ -102,7 +102,7 @@ The inner pot stays cool. Tomatoes last for weeks.
 """
 
 
-def test_visuals_lines_reach_image_and_motion_prompts_but_are_never_spoken(tmp_path, monkeypatch):
+def test_visuals_lines_reach_image_prompts_but_are_never_spoken(tmp_path, monkeypatch):
     p = write(tmp_path, DESCRIBED)
     scenes = mv.parse_script(p)
     assert all("Visuals" not in s["text"] for s in scenes)  # not spoken or captioned
@@ -117,12 +117,6 @@ def test_visuals_lines_reach_image_and_motion_prompts_but_are_never_spoken(tmp_p
     assert "Visuals: fresh tomatoes" in fake.requests[1]
     saved = json.loads(prompts.read_text(encoding="utf-8"))["scenes"]
     assert saved[0]["description"].startswith("HACK 1 NIGERIA")
-
-    import video_job
-    fake.replies = ["slow push-in as the hands lower the pot"]
-    assert video_job.write_motion_prompt("a pot", providers, scenes[0]["description"]) == \
-        "slow push-in as the hands lower the pot"
-    assert "the motion should act it out): HACK 1 NIGERIA - Visuals: hands placing" in fake.requests[-1]
 
 
 def test_changed_description_rewrites_only_that_prompt(tmp_path, monkeypatch):
@@ -145,9 +139,9 @@ def test_check_shows_what_each_scene_becomes(tmp_path, capsys):
     p = write(tmp_path, DESCRIBED + "\n[visual: mine.png] My own photo.\n")
     args = mv.parse_args([str(p), "--check", "--output", str(tmp_path / "Exports" / "story")])
     a = sc.report(p, args)
-    assert [r["kind"] for r in a["rows"]] == ["video", "image", "own file"]
+    assert [r["kind"] for r in a["rows"]] == ["image", "image", "own file"]
     out = capsys.readouterr().out
-    assert "Video (Kaggle):    1" in out and "Image (Cloudflare): 2" in out and "Own file:          3" in out
+    assert "Strong move ([video]): 1" in out and "Image (Cloudflare): 1, 2" in out and "Own file:          3" in out
     assert "Visual descriptions used in prompts (2 of 3 scenes):" in out
 
 
@@ -181,7 +175,6 @@ def test_check_counts_words_seconds_and_video_scenes(tmp_path):
     per_word = 60 / (sc.WPM["edge"] * 1.2)
     assert a["rows"][0]["seconds"] == pytest.approx(12 * per_word + mv.PAUSE)
     assert [r["video"] for r in a["rows"]] == [True, False, False, True]
-    assert a["kaggle"]["clips"] == 2 and a["kaggle"]["minutes"] == sc.KAGGLE_SETUP_MIN + 2 * 36
 
 
 def test_check_flags_missing_visual_overlong_and_unknown_tags(tmp_path):
@@ -198,16 +191,10 @@ def test_short_fragments_are_not_flagged(tmp_path):
     assert a["flags"] == []
 
 
-def test_check_flags_more_than_six_video_scenes(tmp_path):
-    a = check(tmp_path, "\n\n".join(f"[video] Scene {i} happens." for i in range(7)))
-    assert any("7 scenes are marked [video]" in f for f in a["flags"])
-
-
-def test_check_flags_video_with_visual(tmp_path):
+def test_video_tag_on_an_own_file_is_just_a_stronger_move(tmp_path):
     (tmp_path / "mine.png").write_bytes(b"x")
     a = check(tmp_path, "[video] [visual: mine.png] My own picture.\n")
-    assert any("both [video] and [visual: mine.png]" in f for f in a["flags"])
-    assert a["kaggle"]["clips"] == 0
+    assert a["flags"] == [] and a["rows"][0]["video"] and a["rows"][0]["kind"] == "own file"
 
 
 def test_check_counts_cached_prompts_and_images_as_free(tmp_path, monkeypatch):
@@ -216,12 +203,23 @@ def test_check_counts_cached_prompts_and_images_as_free(tmp_path, monkeypatch):
     prompts = tmp_path / "Exports" / "story_prompts.json"
     prompts.parent.mkdir(parents=True)
     prompts.write_text(json.dumps({"scenes": [{"narration": "Ama runs. The roots creak.", "prompt": "a girl running"}]}))
-    full = av.full_prompt("a girl running", "")
-    av.save_image(b"jpg", av.image_path(full, av.IMAGE_MODEL))
+    full = av.full_prompt("a girl running", "", "horizontal")
+    av.save_image(b"jpg", av.image_path(full, av.IMAGE_MODEL, "horizontal"))
     est = check(tmp_path, text, "--style", "")["estimates"]
-    assert (est["prompts_saved"], est["prompts_new"], est["images_cached"], est["images_new"]) == (1, 1, 1, 1)
-    assert est["neurons_images"] == pytest.approx(av.FLUX_NEURONS)
-    assert 3 < est["neurons_prompts"] < 20  # one new prompt with the 8B model
+    # scene 1: 16:9 cached, 9:16 new; scene 2: a new prompt and both shapes
+    assert (est["prompts_saved"], est["prompts_new"], est["images_cached"], est["images_new"]) == (1, 1, 1, 3)
+    assert est["neurons_images"] == pytest.approx(3 * av.image_neurons(av.IMAGE_MODEL, "horizontal"))
+    assert 20 < est["neurons_prompts"] < 120  # one new prompt with the 70B model
+    est = check(tmp_path, text, "--style", "", "--new-images")["estimates"]
+    assert (est["images_cached"], est["images_new"]) == (0, 4)
+
+
+def test_check_estimates_upscaling_on_kaggle(tmp_path, monkeypatch):
+    monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
+    a = check(tmp_path, "One scene.\n\nTwo scene.\n", "--upscale")
+    assert a["estimates"]["upscale_todo"] == 4  # 2 scenes x 2 shapes, all new
+    assert a["upscale_minutes"] == pytest.approx(sc.UPSCALE_SETUP_MIN + 4 * sc.UPSCALE_SEC_PER_IMAGE / 60)
+    assert check(tmp_path, "One scene.\n")["upscale_minutes"] == 0  # not asked for
 
 
 def test_pollinations_images_cost_no_cloudflare_neurons(tmp_path):
@@ -236,17 +234,18 @@ def test_check_needs_no_ffmpeg_or_network(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["make_video.py", str(p), "--check"])
     mv.main()
     out = capsys.readouterr().out
-    assert "4 scenes" in out and "Kaggle (with --kaggle-video): 2 clip(s)" in out
+    assert "4 scenes" in out and "Strong move ([video]): 1, 4" in out and "Kaggle" not in out
 
 
 # ---------- 5. config defaults ----------
 
 def test_style_from_config_file(tmp_path, monkeypatch):
     cfg = tmp_path / "make_video.toml"
-    cfg.write_text('[defaults]\nstyle = "3D animated film style"\nrate = "+20%"\nkaggle-size = "1280x704"\n')
+    cfg.write_text('[defaults]\nstyle = "3D animated film style"\nrate = "+20%"\nimage-model = "flux-1-schnell"\n'
+                   'upscale = true\n')
     monkeypatch.setattr(mv, "CONFIG_FILE", cfg)
     a = mv.parse_args(["s.txt"])
-    assert (a.style, a.rate, a.kaggle_size) == ("3D animated film style", "+20%", "1280x704")
+    assert (a.style, a.rate, a.image_model, a.upscale) == ("3D animated film style", "+20%", "flux-1-schnell", True)
 
 
 def test_env_style_beats_config_and_cli_beats_both(tmp_path, monkeypatch):
@@ -348,3 +347,33 @@ def test_mentioned_matches_any_distinctive_word_as_a_whole_word():
     assert av.mentioned("Grandpa Kofi", "Kofi smiled") and av.mentioned("Grandpa Kofi", "Grandpa laughed")
     assert not av.mentioned("Ama", "the drama begins")
     assert not av.mentioned("The Old Man", "an old tree")  # generic words alone don't count
+
+
+def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
+    text = "Ama runs.\n\nKofi waves.\n"
+    prompts = tmp_path / "Exports" / "story_prompts.json"
+    prompts.parent.mkdir(parents=True)
+    prompts.write_text(json.dumps({"scenes": [{"narration": "Ama runs.", "prompt": "a girl running"},
+                                              {"narration": "Kofi waves.", "prompt": "an old man"}]}))
+    for shot in ("a girl running", "an old man"):
+        for z in ("horizontal", "vertical"):
+            av.save_image(b"jpg", av.image_path(av.full_prompt(shot, "", z), av.IMAGE_MODEL, z))
+    av.save_verdict(av.image_path(av.full_prompt("a girl running", "", "horizontal"), av.IMAGE_MODEL, "horizontal"),
+                    {"ok": True, "problems": [], "score": 9})
+    est = check(tmp_path, text, "--style", "")["estimates"]
+    assert (est["images_cached"], est["images_new"], est["checks"]) == (4, 0, 0)
+    est = check(tmp_path, text, "--style", "", "--redo-scenes", "2", "--check-images")["estimates"]
+    assert (est["images_cached"], est["images_new"]) == (2, 2)
+    assert est["checks"] == 1 + 2  # scene 1's unchecked vertical image, and scene 2's two new ones
+    assert est["neurons_checks"] == pytest.approx(3 * sc.check_neurons(av.VISION_MODEL))
+    assert 25 < sc.check_neurons(av.VISION_MODEL) < 60
+
+
+def test_project_defaults_make_the_script_name_the_whole_command(monkeypatch):
+    monkeypatch.setattr(mv, "CONFIG_FILE", mv.ROOT / "make_video.toml")
+    a = mv.parse_args(["s.txt"])
+    assert (a.generate_visuals, a.check_images, a.upscale) == (True, True, True)
+    a = mv.parse_args(["s.txt", "--no-upscale", "--no-check-images", "--no-generate-visuals"])
+    assert (a.generate_visuals, a.check_images, a.upscale) == (False, False, False)
+    assert mv.parse_args(["s.txt", "--no-generate-visuals", "--redo-scenes", "3"]).generate_visuals  # redo still draws
