@@ -2,9 +2,11 @@
 
 Reports scene count, words and estimated seconds per scene, [video] (stronger move) and [visual:] scenes,
 the '#' comment lines it skipped, and flags overlong paragraphs, missing [visual:] files and leftover [tags] that
-would be spoken. Estimates Cloudflare neurons (counting cached prompts and images as free), Kaggle GPU time for
---upscale and the render time. No network, audio or ffmpeg is used.
+would be spoken. Estimates Cloudflare neurons (counting cached prompts and images as free), what they cost beyond the
+free 10,000 a day, whether the run fits under max-daily-neurons, Kaggle GPU time for upscaling and the render time. With
+--draft, Pollinations draws the images, so only the prompts cost neurons. No network, audio or ffmpeg is used.
 """
+import argparse
 import re
 
 import ai_visuals
@@ -18,7 +20,7 @@ MAX_SENTENCES, MAX_WORDS, SENTENCE_WORDS = 3, 60, 40
 VIDEO_SHARE = (12, 6)  # [video] on about one scene in 12 to one in 6 (at least 1, and up to 5 in a short script)
 PREVIOUS_PROMPT_CHARS = 350  # a typical image prompt, passed as context to the next one
 PROMPT_OUT_TOKENS, CHECK_OUT_TOKENS = 90, 60
-# --upscale on Kaggle T4, measured on Script2 (Oct 2026): a 1.9 min session for 38 images at 1536x864 (2x),
+# upscaling on Kaggle T4, measured on Script2 (Oct 2026): a 1.9 min session for 38 images at 1536x864 (2x),
 # ~0.6 min of install and weights plus 2.0 s per image; rounded up a little
 UPSCALE_SETUP_MIN, UPSCALE_SEC_PER_IMAGE = 1.0, 2.0
 KAGGLE_WEEKLY_HOURS = 30
@@ -94,20 +96,29 @@ def analyse(script, args):
     prompts_path = out.prompts
     saved = ai_visuals.load_prompt_records(prompts_path)
     sheet = ai_visuals.build_sheet(mv.parse_characters(script), ai_visuals.load_characters(prompts_path))
-    cloudflare_images = args.image_provider in ("auto", "cloudflare")
+    draft = getattr(args, "draft", False)
+    cloudflare_images = not draft  # a draft's images come from Pollinations
     model_id = ai_visuals.resolve_model(args.image_model)
     model = ai_visuals.model_info(model_id)
-    formats = list(mv.FORMATS) if args.format == "both" else [args.format]
-    sizes = formats if model.sized and args.image_provider != "pollinations" else ["square"]
-    cache_ids = [model_id, ai_visuals.POLLINATIONS_CACHE_ID]
+    if draft:
+        formats = ["vertical"] if args.format == "vertical" else ["horizontal"]
+    else:
+        formats = list(mv.FORMATS) if args.format == "both" else [args.format]
+    sizes = formats if model.sized or draft else ["square"]
+    check_images = args.check_images and not draft
+
+    def cached(full, z):
+        """The image the run would reuse: the draft cache for a draft, Cloudflare's for a final render."""
+        p = ai_visuals.draft_path(full, z) if draft else ai_visuals.image_path(full, model_id, z)
+        return p if p.exists() else None
     fresh = ai_visuals.style_changed(prompts_path, args.style)
     if fresh:
         saved = {}
         notes.append(f"the style changed since {prompts_path.name} was written, so every prompt is written again")
     est = {"prompts_new": 0, "prompts_saved": 0, "prompts_redescribed": 0, "images_new": 0, "images_cached": 0,
            "neurons_prompts": 0.0, "neurons_images": 0.0, "sizes": sizes, "model": model_id,
-           "per_image": [model.neurons(*ai_visuals.dims(z)) for z in sizes], "upscale_todo": 0, "checks": 0,
-           "neurons_checks": 0.0}
+           "per_image": [model.neurons(*ai_visuals.dims(z)) if cloudflare_images else 0.0 for z in sizes],
+           "upscale_todo": 0, "checks": 0, "neurons_checks": 0.0, "draft": draft}
     redo = getattr(args, "redo", set())
     sheet_chars = len(ai_visuals.sheet_text(sheet))
     scene_cost = {}  # 0-based scene: its Cloudflare neurons (prompt, images, checks; second shot added below)
@@ -126,12 +137,12 @@ def analyse(script, args):
             shot = ai_visuals.enforce_characters(prompt, s["text"], sheet, s["description"])
             for z in sizes:
                 full = ai_visuals.full_prompt(shot, args.style, z)
-                hit = next((p for m in cache_ids if (p := ai_visuals.image_path(full, m, z)).exists()), None)
+                hit = cached(full, z)
                 if hit and not args.new_images and row["scene"] - 1 not in redo:
                     est["images_cached"] += 1
-                    if args.check_images and not ai_visuals.load_verdict(hit):
+                    if check_images and not ai_visuals.load_verdict(hit):
                         est["checks"] += 1  # cached, but never checked
-                    if args.upscale and not upscale_cached(hit):
+                    if not draft and not upscale_cached(hit):
                         est["upscale_todo"] += 1
                 else:
                     est["images_new"] += 1
@@ -144,32 +155,32 @@ def analyse(script, args):
             chars = (len(ai_visuals.PROMPT_SYSTEM) + len(s["text"]) + len(s["description"]) + len(args.style)
                      + sheet_chars + PREVIOUS_PROMPT_CHARS)
             est["neurons_prompts"] += text_neurons(args.text_model, chars, PROMPT_OUT_TOKENS)
-        checked = (est["images_new"] - before[1] + est["checks"] - before[2]) if args.check_images else 0
+        checked = (est["images_new"] - before[1] + est["checks"] - before[2]) if check_images else 0
         scene_cost[i] = (est["neurons_prompts"] + est["neurons_images"] - before[0]
                          + checked * check_neurons(args.vision_model))
-    two = second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cache_ids, cloudflare_images)
+    two = second_shot_estimate(scenes, saved, sheet, args, sizes, model, cached, cloudflare_images)
     for i, (neurons, images) in two.pop("per_scene").items():
         scene_cost[i] = scene_cost.get(i, 0.0) + neurons + (images * check_neurons(args.vision_model)
-                                                           if args.check_images else 0)
+                                                           if check_images else 0)
     est.update(two)
-    est["fallback"] = fallback_plan(scene_cost, args)
-    if args.check_images:  # one check per new image; failures cost a redraw and a check each, not counted here
+    if check_images:  # one check per new image; failures cost a redraw and a check each, not counted here
         est["checks"] += est["images_new"]
         est["neurons_checks"] = est["checks"] * check_neurons(args.vision_model)
-    if args.check_images:
         est["neurons_checks"] += est["second_images_new"] * check_neurons(args.vision_model)
     est["neurons_total"] = (est["neurons_prompts"] + est["neurons_images"] + est["neurons_checks"]
                             + est["neurons_second"])
-    if args.upscale:  # new images are always under 2048 px, so each one goes to Kaggle once
-        est["upscale_todo"] += est["images_new"]
+    if not draft:  # new images are always under 2048 px, so each one goes to Kaggle once
+        est["upscale_todo"] += est["images_new"] + est["second_images_new"]
     import shorts
     seconds = [r["seconds"] for r in rows]
     sections = mv.parse_sections(script)
     branding = shorts.branding_of(args)
     parts = shorts.split(seconds, sections, branding=branding) if args.format in ("both", "vertical") and rows else []
-    est["neurons_meta"] = 0.0 if args.no_metadata else metadata_neurons(scenes, parts, args)
+    est["neurons_meta"] = 0.0 if args.no_metadata or draft else metadata_neurons(scenes, parts, args)
     est["neurons_total"] += est["neurons_meta"]
-    est["days"] = -(-int(est["neurons_total"]) // ai_visuals.FREE_NEURONS_PER_DAY) if est["neurons_total"] else 0
+    est["cap"] = cap_plan(scene_cost, args, est["neurons_total"])
+    cap = args.max_daily_neurons
+    est["days"] = -(-int(est["neurons_total"]) // cap) if cap and est["neurons_total"] else 0
     upscale_min = (UPSCALE_SETUP_MIN + est["upscale_todo"] * UPSCALE_SEC_PER_IMAGE / 60) if est["upscale_todo"] else 0
     return {"script": script, "rows": rows, "flags": flags, "notes": notes, "sheet": sheet, "comments": comments,
             "declared": mv.parse_characters(script), "estimates": est, "upscale_minutes": upscale_min,
@@ -182,7 +193,7 @@ def analyse(script, args):
 SECOND_PROMPT_CHARS, SECOND_OUT_TOKENS = 1200, 110  # the second-shot rewrite: the first prompt in, a new one out
 
 
-def second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cache_ids, cloudflare_images):
+def second_shot_estimate(scenes, saved, sheet, args, sizes, model, cached, cloudflare_images):
     """--two-shots: scenes over 6 s get a second image; its prompt and images count unless already saved and cached.
     Stock scenes won't need one, so this is the most it can cost."""
     two = mv.two_shot_scenes(scenes, args)
@@ -203,7 +214,7 @@ def second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cac
         for z in sizes:
             shot = ai_visuals.enforce_characters(prompt2, s["text"], sheet, s["description"]) if prompt2 else None
             full = ai_visuals.full_prompt(shot, args.style, z) if shot else None
-            if full and not args.new_images and any(ai_visuals.image_path(full, m, z).exists() for m in cache_ids):
+            if full and not args.new_images and cached(full, z):
                 continue
             out["second_images_new"] += 1
             out["neurons_second"] += model.neurons(*ai_visuals.dims(z)) if cloudflare_images else 0
@@ -211,23 +222,23 @@ def second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cac
     return out
 
 
-def fallback_plan(scene_cost, args):
-    """Which scenes will likely be made after Cloudflare's allowance runs out: their prompts are then written by
-    Pollinations' text model and their images drawn by Pollinations (image-provider auto with a key), or they get
-    title cards. Walks the scenes in order against the neurons this PC hasn't spent today (an upper bound: other use
-    of the account isn't counted)."""
-    left = ai_visuals.neurons_left()
-    spent, late = 0.0, []
+def cap_plan(scene_cost, args, total):
+    """How the run fits under max-daily-neurons (spent today in Nairobi time, from this PC's usage record) and what it
+    costs beyond the free neurons left today (UTC day). Walks the scenes in order: those past the cap would use the
+    Pollinations backup (or title cards without a key). Other use of the same account isn't counted."""
+    spent, cap = ai_visuals.spent_today(), args.max_daily_neurons
+    room = max(0.0, cap - spent) if cap else float("inf")
+    used, late = 0.0, []
     for i in sorted(scene_cost):
         if scene_cost[i] <= 0:
             continue  # cached: nothing to make
-        spent += scene_cost[i]
-        if spent > left:
+        used += scene_cost[i]
+        if used > room:
             late.append(i + 1)
-    key = bool(ai_visuals.pollinations_key())
-    to = ("Pollinations" if args.image_provider == "auto" and key else
-          "title cards (no POLLINATIONS_API_KEY)" if args.image_provider == "auto" else "title cards")
-    return {"left": left, "refused": ai_visuals.usage_today()["refused"], "scenes": late, "to": to}
+    free = ai_visuals.free_left()
+    to = "the Pollinations backup" if ai_visuals.pollinations_key() else "title cards (no POLLINATIONS_API_KEY)"
+    return {"spent": spent, "cap": cap, "room": room, "fits": total <= room, "scenes": late, "to": to,
+            "free_left": free, "billable": max(0.0, total - free), "dollars": ai_visuals.dollars(total, free)}
 
 
 def scene_list(numbers):
@@ -276,7 +287,12 @@ def stock_plan(scenes, args, out):
 
 def upscale_cached(image):
     import upscale
-    return upscale.long_side(image) >= upscale.MIN_SIDE or upscale.cached_path(image).exists()
+    try:
+        if upscale.long_side(image) >= upscale.MIN_SIDE:
+            return True
+    except OSError:  # unreadable: the render finds out; here it just counts as to do
+        pass
+    return upscale.cached_path(image).exists()
 
 
 def report(script, args):
@@ -309,7 +325,7 @@ def report(script, args):
     images = [r["scene"] for r in rows if r["kind"] == "image"]
     own = [r["scene"] for r in rows if r["kind"] == "own file"]
     print(f"\nStrong move ([video]): {', '.join(map(str, strong)) or 'none'}")
-    print(f"Image (Cloudflare): {', '.join(map(str, images)) or 'none'}")
+    print(f"Image ({'Pollinations, draft' if est['draft'] else 'Cloudflare'}): {', '.join(map(str, images)) or 'none'}")
     st = a["stock"]
     if args.media == "ai":
         print("Stock media:        off (--media ai)")
@@ -351,18 +367,22 @@ def report(script, args):
     print()
     shapes = " + ".join("x".join(map(str, ai_visuals.dims(z))) for z in est["sizes"])
     each = " + ".join(f"{n:.0f}" for n in est["per_image"])
-    print(f"Cloudflare (with --generate-visuals; cached prompts and images are free; "
-          f"{est['model'].rsplit('/', 1)[-1]} at {shapes}, ~{each} neurons per scene):")
+    if est["draft"]:
+        print(f"Cloudflare (draft: Pollinations draws the images at {shapes}; Cloudflare writes the prompts, which the "
+              "final render reuses; cached prompts are free):")
+    else:
+        print(f"Cloudflare (final render; cached prompts and images are free; "
+              f"{est['model'].rsplit('/', 1)[-1]} at {shapes}, ~{each} neurons per scene):")
     print(f"  image prompts: {est['prompts_new']} new (~{est['neurons_prompts']:.0f} neurons), {est['prompts_saved']} saved")
     if est["prompts_redescribed"]:
         print(f"                 ({est['prompts_redescribed']} of the new ones replace saved prompts that were written "
               "without this scene's current description line)")
-    if args.image_provider in ("auto", "cloudflare"):
-        print(f"  images:        {est['images_new']} new (~{est['neurons_images']:.0f} neurons), {est['images_cached']} cached")
-    else:
-        print(f"  images:        {est['images_new']} new from {args.image_provider} (no Cloudflare neurons), "
+    if est["draft"]:
+        print(f"  images:        {est['images_new']} new from Pollinations (draft cache, no neurons), "
               f"{est['images_cached']} cached")
-    if args.check_images:
+    else:
+        print(f"  images:        {est['images_new']} new (~{est['neurons_images']:.0f} neurons), {est['images_cached']} cached")
+    if args.check_images and not est["draft"]:
         print(f"  quality checks: {est['checks'] + est['second_images_new']} (~{est['neurons_checks']:.0f} neurons; each failed image adds a redraw "
               f"and a check, up to {ai_visuals.QC_RETRIES} times)")
     if est["second_scenes"]:
@@ -372,25 +392,37 @@ def report(script, args):
     if est["neurons_meta"]:
         shorts_note = f", incl. {len(a['parts'])} Shorts" if len(a["parts"]) > 1 else ""
         print(f"  YouTube notes:  ~{est['neurons_meta']:.0f} neurons{shorts_note}")
-    print(f"  total about {est['neurons_total']:,.0f} of {ai_visuals.FREE_NEURONS_PER_DAY:,} free neurons a day")
-    fb = est["fallback"]
-    if args.image_provider == "pollinations":
-        print("  image provider: pollinations (no Cloudflare neurons for images)")
-    elif fb["scenes"]:
-        left = "Cloudflare refused earlier today" if fb["refused"] else f"~{fb['left']:,.0f} neurons left today by this PC's count"
-        print(f"  ! after the allowance runs out ({left}), about {len(fb['scenes'])} scene(s) would fall back to "
-              f"{fb['to']}: {scene_list(fb['scenes'])}")
-    if est["days"] > 1:
-        print(f"  ! this needs about {est['days']} days of Cloudflare's free allowance. Run the same command with "
-              "--visuals-only once a day (each day's images are cached) until --check shows 0 new images, then render.")
+    cp = est["cap"]
+    print(f"  total about {est['neurons_total']:,.0f} neurons")
+    print(f"  cost: ~{cp['billable']:,.0f} neurons beyond the {cp['free_left']:,.0f} free ones left today (of "
+          f"{ai_visuals.FREE_NEURONS_PER_DAY:,}, UTC day), about ${cp['dollars']:.2f} "
+          f"(${ai_visuals.NEURON_PRICE * 1000:.3f} per 1,000)")
+    if not cp["cap"]:
+        print(f"  daily cap: none (max-daily-neurons = 0); ~{cp['spent']:,.0f} spent today")
+    else:
+        after = cp["spent"] + est["neurons_total"]
+        print(f"  daily cap: ~{cp['spent']:,.0f} spent today + this run = ~{after:,.0f} of max-daily-neurons = "
+              f"{cp['cap']:,} (Nairobi day): {'fits' if cp['fits'] else 'DOES NOT FIT'}")
+        if cp["scenes"]:
+            print(f"  ! past the cap, about {len(cp['scenes'])} scene(s) would use {cp['to']}: "
+                  f"{scene_list(cp['scenes'])}. Raise max-daily-neurons in make_video.toml, or render tomorrow, or "
+                  "redraw them later with the --redo-scenes command the run prints.")
+        if est["days"] > 1:
+            print(f"  ! this needs about {est['days']} days under the cap. Run the same command with --visuals-only "
+                  "once a day (each day's images are cached) until --check shows 0 new images, then render.")
     print()
-    if args.upscale:
-        if est["upscale_todo"]:
-            print(f"Kaggle (--upscale): {est['upscale_todo']} image(s) to upscale, about {a['upscale_minutes']:.0f} min "
-                  f"of the ~{KAGGLE_WEEKLY_HOURS} free GPU hours a week")
-        else:
-            print("Kaggle (--upscale): every image is already upscaled (cached), so no GPU time needed")
-    render_estimate(a["total_seconds"], args, [r["seconds"] for r in rows], a["parts"])
+    if est["draft"]:
+        print("Kaggle upscaling: none for a draft")
+    elif est["upscale_todo"]:
+        print(f"Kaggle upscaling: {est['upscale_todo']} image(s) to upscale, about {a['upscale_minutes']:.0f} min "
+              f"of the ~{KAGGLE_WEEKLY_HOURS} free GPU hours a week (if Kaggle fails, the originals are used)")
+    else:
+        print("Kaggle upscaling: every image is already upscaled (cached), so no GPU time needed")
+    if est["draft"]:  # one format, no Shorts
+        one = argparse.Namespace(**{**vars(args), "format": "vertical" if args.format == "vertical" else "horizontal"})
+        render_estimate(a["total_seconds"], one, [r["seconds"] for r in rows], ())
+    else:
+        render_estimate(a["total_seconds"], args, [r["seconds"] for r in rows], a["parts"])
     return a
 
 

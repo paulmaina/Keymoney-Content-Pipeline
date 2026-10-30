@@ -555,7 +555,8 @@ def write(scenes, script, out, args, work, total, lead_in=0.0, parts=None):
     providers = None
     reply = {}
     if creds:
-        providers = ai_visuals.Providers("cloudflare", args.image_model, args.metadata_model, creds=creds, poll_key="")
+        providers = ai_visuals.Providers("final", args.image_model, args.metadata_model, creds=creds, poll_key="",
+                                         cap=getattr(args, "max_daily_neurons", ai_visuals.MAX_DAILY_NEURONS))
         msgs = messages(scenes, chaps, channel)
         cost = providers.model.neurons(*ai_visuals.dims(thumb_size(providers)))
         extra = "" if picture else f" + ~{cost:.0f} for a thumbnail image if not cached"

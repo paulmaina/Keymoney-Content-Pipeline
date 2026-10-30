@@ -88,7 +88,7 @@ def test_comments_are_never_spoken_captioned_or_used_in_prompts(tmp_path, monkey
     for s in scenes:
         s.setdefault("visual", None)
     av.generate_scene_visuals(scenes, prompts, prompts_only=True, characters=mv.parse_characters(p),
-                              providers=av.Providers("cloudflare", creds=("a", "t")))
+                              providers=av.Providers("final", creds=("a", "t")))
     sent = " ".join(fake.requests) + prompts.read_text(encoding="utf-8")
     assert "SECRET" not in sent and "SECRET" not in " ".join(s["image_prompt"] for s in scenes)
     assert "a girl in a yellow dress" in scenes[0]["image_prompt"]  # the character line still works
@@ -111,7 +111,7 @@ def test_visuals_lines_reach_image_prompts_but_are_never_spoken(tmp_path, monkey
     fake = FakeText(["hands placing a clay pot", "tomatoes in a pot"])
     monkeypatch.setattr(av, "cf_run", fake)
     prompts = tmp_path / "p.json"
-    providers = av.Providers("cloudflare", creds=("a", "t"))
+    providers = av.Providers("final", creds=("a", "t"))
     av.generate_scene_visuals(scenes, prompts, prompts_only=True, providers=providers)
     assert "this is what the image must show): HACK 1 NIGERIA - Visuals: hands placing" in fake.requests[0]
     assert "Visuals: fresh tomatoes" in fake.requests[1]
@@ -129,7 +129,7 @@ def test_changed_description_rewrites_only_that_prompt(tmp_path, monkeypatch):
     fake = FakeText(["NEW 2"])
     monkeypatch.setattr(av, "cf_run", fake)
     scenes = mv.parse_script(p)
-    av.generate_scene_visuals(scenes, prompts, prompts_only=True, providers=av.Providers("cloudflare", creds=("a", "t")))
+    av.generate_scene_visuals(scenes, prompts, prompts_only=True, providers=av.Providers("final", creds=("a", "t")))
     saved = [s["prompt"] for s in json.loads(prompts.read_text(encoding="utf-8"))["scenes"]]
     assert saved == ["OLD 1", "NEW 2"] and len(fake.requests) == 1
 
@@ -216,14 +216,15 @@ def test_check_counts_cached_prompts_and_images_as_free(tmp_path, monkeypatch):
 
 def test_check_estimates_upscaling_on_kaggle(tmp_path, monkeypatch):
     monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
-    a = check(tmp_path, "One scene.\n\nTwo scene.\n", "--upscale")
+    a = check(tmp_path, "One scene.\n\nTwo scene.\n")  # always on: no flag needed
     assert a["estimates"]["upscale_todo"] == 4  # 2 scenes x 2 shapes, all new
     assert a["upscale_minutes"] == pytest.approx(sc.UPSCALE_SETUP_MIN + 4 * sc.UPSCALE_SEC_PER_IMAGE / 60)
-    assert check(tmp_path, "One scene.\n")["upscale_minutes"] == 0  # not asked for
+    with pytest.raises(SystemExit):
+        check(tmp_path, "One scene.\n", "--upscale")  # the flag is gone
 
 
-def test_pollinations_images_cost_no_cloudflare_neurons(tmp_path):
-    est = check(tmp_path, "One scene.\n", "--image-provider", "pollinations")["estimates"]
+def test_draft_images_cost_no_cloudflare_neurons(tmp_path):
+    est = check(tmp_path, "One scene.\n", "--draft")["estimates"]
     assert est["images_new"] == 1 and est["neurons_images"] == 0
 
 
@@ -234,18 +235,17 @@ def test_check_needs_no_ffmpeg_or_network(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["make_video.py", str(p), "--check"])
     mv.main()
     out = capsys.readouterr().out
-    assert "4 scenes" in out and "Strong move ([video]): 1, 4" in out and "Kaggle" not in out
+    assert "4 scenes" in out and "Strong move ([video]): 1, 4" in out and "Kaggle upscaling: " in out
 
 
 # ---------- 5. config defaults ----------
 
 def test_style_from_config_file(tmp_path, monkeypatch):
     cfg = tmp_path / "make_video.toml"
-    cfg.write_text('[defaults]\nstyle = "3D animated film style"\nrate = "+20%"\nimage-model = "flux-1-schnell"\n'
-                   'upscale = true\n')
+    cfg.write_text('[defaults]\nstyle = "3D animated film style"\nrate = "+20%"\nimage-model = "flux-1-schnell"\n')
     monkeypatch.setattr(mv, "CONFIG_FILE", cfg)
     a = mv.parse_args(["s.txt"])
-    assert (a.style, a.rate, a.image_model, a.upscale) == ("3D animated film style", "+20%", "flux-1-schnell", True)
+    assert (a.style, a.rate, a.image_model) == ("3D animated film style", "+20%", "flux-1-schnell")
 
 
 def test_env_style_beats_config_and_cli_beats_both(tmp_path, monkeypatch):
@@ -291,7 +291,7 @@ def run_prompts(tmp_path, monkeypatch, texts, replies, characters=None, style=""
     scenes = [{"text": t, "visual": None} for t in texts]
     prompts = tmp_path / "p.json"
     av.generate_scene_visuals(scenes, prompts, style=style, prompts_only=True, characters=characters,
-                              providers=av.Providers("cloudflare", creds=("a", "t")))
+                              providers=av.Providers("final", creds=("a", "t")))
     return scenes, fake, json.loads(prompts.read_text(encoding="utf-8"))
 
 
@@ -332,7 +332,7 @@ def test_edited_sheet_in_prompts_json_is_reused(tmp_path, monkeypatch):
                              "scenes": [{"narration": "Ama sings.", "prompt": "a girl singing"}]}))
     monkeypatch.setattr(av, "cf_run", lambda *a, **k: pytest.fail("saved prompt should be reused"))
     scenes = [{"text": "Ama sings.", "visual": None}]
-    av.generate_scene_visuals(scenes, p, prompts_only=True, providers=av.Providers("cloudflare", creds=("a", "t")))
+    av.generate_scene_visuals(scenes, p, prompts_only=True, providers=av.Providers("final", creds=("a", "t")))
     assert scenes[0]["image_prompt"].startswith("a girl singing, with girl in a green dress")
 
 
@@ -361,7 +361,7 @@ def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, 
             av.save_image(b"jpg", av.image_path(av.full_prompt(shot, "", z), av.IMAGE_MODEL, z))
     av.save_verdict(av.image_path(av.full_prompt("a girl running", "", "horizontal"), av.IMAGE_MODEL, "horizontal"),
                     {"ok": True, "problems": [], "score": 9})
-    est = check(tmp_path, text, "--style", "")["estimates"]
+    est = check(tmp_path, text, "--style", "", "--no-check-images")["estimates"]
     assert (est["images_cached"], est["images_new"], est["checks"]) == (4, 0, 0)
     est = check(tmp_path, text, "--style", "", "--redo-scenes", "2", "--check-images")["estimates"]
     assert (est["images_cached"], est["images_new"]) == (2, 2)
@@ -373,7 +373,7 @@ def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, 
 def test_project_defaults_make_the_script_name_the_whole_command(monkeypatch):
     monkeypatch.setattr(mv, "CONFIG_FILE", mv.ROOT / "make_video.toml")
     a = mv.parse_args(["s.txt"])
-    assert (a.generate_visuals, a.check_images, a.upscale) == (True, True, True)
-    a = mv.parse_args(["s.txt", "--no-upscale", "--no-check-images", "--no-generate-visuals"])
-    assert (a.generate_visuals, a.check_images, a.upscale) == (False, False, False)
+    assert (a.generate_visuals, a.check_images) == (True, True)
+    a = mv.parse_args(["s.txt", "--no-check-images", "--no-generate-visuals"])
+    assert (a.generate_visuals, a.check_images) == (False, False)
     assert mv.parse_args(["s.txt", "--no-generate-visuals", "--redo-scenes", "3"]).generate_visuals  # redo still draws

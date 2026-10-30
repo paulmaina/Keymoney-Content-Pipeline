@@ -189,9 +189,9 @@ def test_check_reports_the_main_video_and_each_part(tmp_path, capsys):
     assert all(x == 0 or (x - 1) % 10 == 0 for x, _ in a["parts"])  # every cut at a HACK heading
 
 
-def test_check_warns_when_cloudflare_needs_several_days(tmp_path, capsys):
+def test_check_warns_when_the_daily_cap_needs_several_days(tmp_path, capsys):
     p = script(tmp_path, LONG)
-    args = mv.parse_args([str(p), "-o", str(tmp_path / "o"), "--generate-visuals", "--check-images"])
+    args = mv.parse_args([str(p), "-o", str(tmp_path / "o"), "--check-images", "--max-daily-neurons", "10000"])
     a = script_check.report(p, args)
     out = capsys.readouterr().out
     days = a["estimates"]["days"]

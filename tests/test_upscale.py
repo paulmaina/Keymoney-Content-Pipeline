@@ -1,4 +1,4 @@
-"""Tests for --upscale: batching, the cache and falling back to the originals. Kaggle is faked."""
+"""Tests for upscaling (on every render): batching, the cache and falling back to the originals. Kaggle is faked."""
 import json
 
 import pytest
@@ -107,8 +107,33 @@ def test_time_cap_grows_with_the_batch():
 
 
 def test_cli_flags():
-    a = mv.parse_args(["s.txt", "--upscale"])
-    assert a.upscale
+    with pytest.raises(SystemExit):  # upscaling is always on: no flag
+        mv.parse_args(["s.txt", "--upscale"])
     for gone in ("--kaggle-video", "--kaggle-resume", "--video-scenes", "--export-video-job", "--clips", "--clip-fill"):
         with pytest.raises(SystemExit):
             mv.parse_args(["s.txt", gone, "1"])
+
+
+def test_no_kaggle_token_warns_and_renders_the_originals(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("KAGGLE_API_TOKEN", raising=False)
+    monkeypatch.setattr(upscale.ai_visuals, "ENV_FILE", tmp_path / "no.env")
+    wide = picture(tmp_path / "w.jpg", (1536, 864))
+    scenes, notes = [{"src": wide, "visual": None}], []
+    upscale.upscale_scenes(scenes, ["horizontal"], notes=notes)  # never stops the render
+    assert scenes[0]["src"] == wide
+    assert "WARNING: upscaling skipped: Upscaling needs KAGGLE_API_TOKEN" in capsys.readouterr().out
+    assert len(notes) == 1 and "original images" in notes[0]
+
+
+def test_used_up_gpu_hours_get_a_plain_warning(tmp_path, capsys):
+    wide = picture(tmp_path / "w.jpg", (1536, 864))
+    scenes, notes = [{"src": wide, "visual": None}], []
+
+    class OutOfQuota(FakeCLI):
+        def run(self, *args, **k):
+            if args[:2] == ("kernels", "push"):
+                raise upscale.kaggle_runner.KaggleError("kernel push failed:\nYou have exceeded your weekly GPU quota")
+            return super().run(*args, **k)
+    upscale.upscale_scenes(scenes, ["horizontal"], cli=OutOfQuota(), sleep=lambda s: None, notes=notes)
+    assert scenes[0]["src"] == wide
+    assert "weekly GPU hours look used up" in capsys.readouterr().out and len(notes) == 1

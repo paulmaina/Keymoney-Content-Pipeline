@@ -16,3 +16,4 @@ def no_user_defaults(monkeypatch, tmp_path):
     # nor count fake Cloudflare usage against today's real allowance
     monkeypatch.setattr(ai_visuals, "usage_path", lambda: tmp_path / "cloudflare_usage.json")
     monkeypatch.delenv("VIDEO_STYLE", raising=False)
+    monkeypatch.delenv("KAGGLE_API_TOKEN", raising=False)  # upscaling runs on every render: never reach real Kaggle

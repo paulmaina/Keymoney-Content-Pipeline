@@ -272,6 +272,7 @@ def test_preview_renders_only_the_picked_scenes_to_working_preview(tmp_path, mon
     monkeypatch.setattr(mv, "narrate", lambda sc, work, args: seen.setdefault("texts", [s["text"] for s in sc]) and work)
     monkeypatch.setattr(mv, "make_captions", lambda *a, **k: (None, None))
     monkeypatch.setattr(mv, "duration", lambda path: 12.0)
+    monkeypatch.setattr(mv, "stamp_draft", lambda video, font: seen.setdefault("label", video))
 
     def render_all(sc, work, narration, chunks, font, args, formats, out, script, parts):
         seen.update(formats=formats, video=out.video(formats[0]), parts=parts)
@@ -283,7 +284,7 @@ def test_preview_renders_only_the_picked_scenes_to_working_preview(tmp_path, mon
     mv.main()
     assert seen["texts"] == ["Scene number 2 is here.", "Scene number 4 is here."]
     assert seen["formats"] == ["horizontal"] and seen["parts"] == []
-    assert seen["video"] == tmp_path / "Exports" / "Story" / "Working" / "preview.mp4"
+    assert seen["video"] == seen["label"] == tmp_path / "Exports" / "Story" / "Working" / "preview.mp4"
 
 
 def test_a_rainforest_is_not_rain():

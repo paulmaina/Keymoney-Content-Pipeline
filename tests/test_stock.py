@@ -106,7 +106,7 @@ def test_media_lines_and_options(tmp_path):
     assert [s.get("media") for s in mv.parse_script(p)] == ["stock", "ai", None]
     assert mv.parse_comments(p) == []  # media lines aren't reported as skipped comments
     a = mv.parse_args(["s.txt"])
-    assert (a.media, a.stock, a.generate_visuals) == ("mixed", "auto", False)
+    assert (a.media, a.stock, a.generate_visuals) == ("mixed", "auto", True)  # the plain command: AI images and stock
     a = mv.parse_args(["s.txt", "--media", "stock", "--stock", "pixabay"])
     assert (a.media, a.stock, a.generate_visuals) == ("stock", "pixabay", True)
 
@@ -314,7 +314,7 @@ def test_ai_images_are_made_only_for_scenes_stock_did_not_fill(tmp_path, monkeyp
                                                   {"image": __import__("test_ai_visuals").jpeg_b64()}))
     scenes = [{"text": "Fog.", "visual": None, "stock": {"horizontal": {}}, "src": tmp_path / "s.mp4"},
               {"text": "A pot.", "visual": None}]
-    av.generate_scene_visuals(scenes, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=("a", "t")),
+    av.generate_scene_visuals(scenes, tmp_path / "p.json", providers=av.Providers("final", creds=("a", "t")),
                               formats=("horizontal",))
     assert scenes[0]["src"] == tmp_path / "s.mp4" and scenes[1]["src"].parent == av.GEN_DIR
     assert sum("messages" in c for c in calls) == 1  # no prompt written for the stock scene

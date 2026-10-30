@@ -109,7 +109,7 @@ def test_new_images_keeps_saved_prompts_but_draws_again(api, tmp_path):
     run(first, prompts)
     api.calls.clear()
     again = scenes("One.", "Two.")
-    av.generate_scene_visuals(again, prompts, providers=av.Providers("cloudflare", creds=CREDS, new_images=True), **ONE)
+    av.generate_scene_visuals(again, prompts, providers=av.Providers("final", creds=CREDS, new_images=True), **ONE)
     assert api.text_calls() == []  # saved prompts reused
     assert len(api.image_calls()) == 2  # cache skipped: both drawn again
     seeds = [p["seed"] for p in api.image_calls()]  # FLUX.2 takes a seed: a random one gives a new picture
@@ -125,7 +125,7 @@ def test_new_images_uses_a_random_pollinations_seed(api, tmp_path, monkeypatch):
     monkeypatch.setattr(av, "pollinations_run", lambda prompt, key, seed, timeout=180, size="square":
                         seeds.append(seed) or base64.b64decode(jpeg_b64()))
     for new in (False, False, True):
-        av.Providers("pollinations", creds=CREDS, poll_key="sk_x", new_images=new).image("a pot", regenerate=True)
+        av.Providers("draft", creds=CREDS, poll_key="sk_x", new_images=new).image("a pot", regenerate=True)
     assert seeds[0] == seeds[1] == av.stable_seed("a pot") and seeds[2] != seeds[0]
 
 
@@ -174,9 +174,10 @@ def test_previous_prompt_is_context_and_style_is_appended(api, tmp_path):
 def test_text_model_failure_falls_back_to_template(api, tmp_path):
     api.fail_text = True
     run(scenes("Villagers stretch mesh nets."), tmp_path / "p.json")
-    assert len(api.text_calls()) == av.ATTEMPTS
+    assert len(api.text_calls()) == 2  # one retry
     template = av.fallback_prompt("Villagers stretch mesh nets.").rstrip(".")
     assert api.image_calls()[0]["prompt"].startswith(template + ", " + av.COMPOSITION["horizontal"])
+    assert json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["scenes"][0]["stand_in"]  # written next time
 
 
 def test_prompt_writer_is_never_told_about_shot_notes(api, tmp_path):
@@ -200,7 +201,7 @@ def test_failed_image_falls_back_to_title_card(api, tmp_path):
     sc = scenes("One.", "Two.")
     assert run(sc, tmp_path / "p.json") == [1, 2]
     assert all(s["src"] is None for s in sc)  # None -> make_video renders a title card
-    assert len(api.image_calls()) == 2 * av.ATTEMPTS
+    assert len(api.image_calls()) == 2 * 2  # each scene: one try and one retry
 
 
 def test_bad_image_payload_is_a_failure_not_a_crash(api, tmp_path, monkeypatch):
@@ -210,13 +211,20 @@ def test_bad_image_payload_is_a_failure_not_a_crash(api, tmp_path, monkeypatch):
     assert run(sc, tmp_path / "p.json") == [1] and sc[0]["src"] is None
 
 
-def test_auth_error_stops_cloudflare_mode_without_leaking_secrets(monkeypatch):
+def test_auth_error_stops_cloudflare_without_leaking_secrets(monkeypatch, capsys):
+    calls = []
+
     def reject(*a, **k):
+        calls.append(1)
         raise av.CloudflareError("HTTP 403: Authentication error", auth=True, status=403)
     monkeypatch.setattr(av, "cf_run", reject)
-    with pytest.raises(SystemExit) as e:
-        av.Providers("cloudflare", creds=CREDS).image("a pot")
-    assert "Workers AI" in str(e.value) and TOKEN not in str(e.value) and ACCOUNT not in str(e.value)
+    p = av.Providers("final", creds=CREDS, poll_key="")
+    for prompt in ("a pot", "a jar"):
+        with pytest.raises(av.ProviderError):
+            p.image(prompt)
+    out = capsys.readouterr().out
+    assert len(calls) == 1  # no retry for bad credentials, and never asked again this run
+    assert "Workers AI Read + Edit" in out and TOKEN not in out and ACCOUNT not in out
 
 
 @pytest.mark.parametrize("error, retryable", [
@@ -270,26 +278,29 @@ def quota_error():
                             quota=True, status=429)
 
 
-def test_quota_exhausted_switches_to_pollinations_for_rest_of_run(api, tmp_path, monkeypatch):
+def test_a_cloudflare_error_after_a_retry_sends_that_scene_to_the_backup(api, tmp_path, monkeypatch):
     def cf(model, payload, creds, timeout=120):
         if model == av.TEXT_MODEL:  # a distinct prompt per scene, so nothing comes from the cache
             return {"response": "prompt for " + payload["messages"][1]["content"][-8:]}
         api.calls.append((model, payload))
-        raise quota_error()
+        if "Two" in payload["prompt"]:
+            return {"image": jpeg_b64()}
+        raise quota_error()  # the free plan's allowance message: on Workers Paid, a real error like any other
     monkeypatch.setattr(av, "cf_run", cf)
     poll = FakePollinations()
     monkeypatch.setattr(av, "pollinations_run", poll)
-    p = av.Providers("auto", creds=CREDS, poll_key="sk_test")
+    p = av.Providers("final", creds=CREDS, poll_key="sk_test")
     sc = scenes("One.", "Two.", "Three.")
     assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p, **ONE) == []
-    assert len(api.calls) == 1  # Cloudflare tried once, then never again this run
-    assert len(poll.prompts) == 3 and all(s["src"].exists() for s in sc)
+    assert len(api.calls) == 2 + 1 + 2  # Cloudflare is asked for every scene: a try and one retry each
+    assert len(poll.prompts) == 2 and all(s["src"].exists() for s in sc)
+    assert p.backup == {1: "Pollinations backup image", 3: "Pollinations backup image"}
     saved = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["scenes"]
-    assert {s["image_provider"] for s in saved} == {"pollinations"}
+    assert [s["image_provider"] for s in saved] == ["pollinations", "cloudflare", "pollinations"]
 
 
 def test_server_error_does_not_stop_cloudflare(api, tmp_path, monkeypatch):
-    errors = iter([av.ProviderError("HTTP 500", retryable=True, status=500)] * av.ATTEMPTS)
+    errors = iter([av.ProviderError("HTTP 500", retryable=True, status=500)] * 2)  # a try and its retry
 
     def cf(model, payload, creds, timeout=120):
         if model == av.TEXT_MODEL:
@@ -300,7 +311,7 @@ def test_server_error_does_not_stop_cloudflare(api, tmp_path, monkeypatch):
         return {"image": jpeg_b64()}
     monkeypatch.setattr(av, "cf_run", cf)
     sc = scenes("One.", "Two.")
-    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("auto", creds=CREDS), **ONE) == [1]
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("final", creds=CREDS), **ONE) == [1]
     assert sc[1]["src"].exists()  # scene 2 still went to Cloudflare
 
 
@@ -314,22 +325,28 @@ def test_both_providers_failing_falls_back_to_title_cards(api, tmp_path, monkeyp
     monkeypatch.setattr(av, "pollinations_run", poll)
     sc = scenes("One.", "Two.")
     failed = av.generate_scene_visuals(sc, tmp_path / "p.json",
-                                       providers=av.Providers("auto", creds=CREDS, poll_key="sk_test"), **ONE)
+                                       providers=av.Providers("final", creds=CREDS, poll_key="sk_test"), **ONE)
     assert failed == [1, 2] and all(s["src"] is None for s in sc)
     assert len(poll.prompts) == 1  # Pollinations also stopped after its credit ran out
 
 
-def test_cached_image_from_any_provider_is_reused(api, tmp_path):
+def test_a_final_render_never_reuses_backup_or_draft_images(api, tmp_path):
     prompt = av.full_prompt("A pot", "")
     av.save_image(base64.b64decode(jpeg_b64()), av.image_path(prompt, av.POLLINATIONS_CACHE_ID))
-    path, name, cached = av.Providers("cloudflare", creds=CREDS).image(prompt)
-    assert (name, cached) == ("pollinations", True) and api.image_calls() == []
+    draft = av.save_image(base64.b64decode(jpeg_b64()), av.draft_path(prompt))
+    path, name, cached = av.Providers("final", creds=CREDS, poll_key="").image(prompt)
+    assert (name, cached) == ("cloudflare", False) and len(api.image_calls()) == 1  # Cloudflare asked again
+    assert av.Providers("draft", creds=CREDS, poll_key="sk_test").image(prompt) == (draft, "pollinations", True)
+    assert draft.parent == av.GEN_DIR / "drafts" and draft != path
 
 
-def test_missing_all_credentials_in_auto_mode_explains_both(monkeypatch):
+def test_a_final_render_needs_cloudflare_and_a_draft_needs_pollinations(monkeypatch):
     with pytest.raises(SystemExit) as e:
-        av.Providers("auto")
-    assert "Cloudflare" in str(e.value) and "POLLINATIONS_API_KEY" in str(e.value)
+        av.Providers("final", poll_key="sk_test")
+    assert "CLOUDFLARE_API_TOKEN" in str(e.value)
+    with pytest.raises(SystemExit) as e:
+        av.Providers("draft", creds=CREDS, poll_key="")
+    assert "POLLINATIONS_API_KEY" in str(e.value)
 
 
 def test_neuron_estimate_uses_reported_tokens(api, tmp_path, monkeypatch):
@@ -338,7 +355,7 @@ def test_neuron_estimate_uses_reported_tokens(api, tmp_path, monkeypatch):
             return {"response": "p", "usage": {"prompt_tokens": 1_000, "completion_tokens": 100}}
         return {"image": jpeg_b64()}
     monkeypatch.setattr(av, "cf_run", cf)
-    p = av.Providers("cloudflare", creds=CREDS)
+    p = av.Providers("final", creds=CREDS)
     av.generate_scene_visuals(scenes("One."), tmp_path / "p.json", providers=p)  # both formats: two images
     rate_in, rate_out = av.TEXT_NEURONS[av.TEXT_MODEL]
     images = av.image_neurons(av.IMAGE_MODEL, "horizontal") + av.image_neurons(av.IMAGE_MODEL, "vertical")
@@ -397,7 +414,7 @@ def test_no_generation_needed_means_no_credentials_needed(monkeypatch, tmp_path)
 
 def test_cli_options():
     a = mv.parse_args(["s.txt"])
-    assert not a.generate_visuals and a.image_model == av.IMAGE_MODEL and a.style == ""
+    assert a.generate_visuals and a.image_model == av.IMAGE_MODEL and a.style == ""  # a full final render
     a = mv.parse_args(["s.txt", "--generate-visuals", "--style", "warm", "--regenerate",
                        "--image-model", "@cf/x/y"])
     assert (a.generate_visuals, a.style, a.regenerate, a.image_model) == (True, "warm", True, "@cf/x/y")
@@ -407,8 +424,9 @@ def test_cli_options():
 
 def test_text_returns_json_text_when_the_reply_arrives_parsed(monkeypatch):
     # llama-3.3-70b's JSON replies come back as an object in "response", not a string
-    monkeypatch.setattr(av, "cf_call", lambda model, payload, creds: {"response": {"titles": ["Fog Nets in Chile"]}})
-    p = av.Providers("cloudflare", creds=CREDS, poll_key="")
+    monkeypatch.setattr(av, "cf_run", lambda model, payload, creds, timeout=120:
+                        {"response": {"titles": ["Fog Nets in Chile"]}})
+    p = av.Providers("final", creds=CREDS, poll_key="")
     assert json.loads(p.text([{"role": "user", "content": "x"}])) == {"titles": ["Fog Nets in Chile"]}
 
 
@@ -416,7 +434,7 @@ def test_text_returns_json_text_when_the_reply_arrives_parsed(monkeypatch):
 
 def test_sized_model_draws_a_real_16_9_and_9_16_image_per_scene(api, tmp_path):
     sc = scenes("Fog over hills.")
-    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS)) == []
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("final", creds=CREDS)) == []
     sizes = [(p["width"], p["height"]) for p in api.image_calls()]
     assert sizes == [(1536, 864), (864, 1536)]
     prompts = [p["prompt"] for p in api.image_calls()]
@@ -428,7 +446,7 @@ def test_sized_model_draws_a_real_16_9_and_9_16_image_per_scene(api, tmp_path):
 
 def test_square_model_draws_one_image_for_both_formats(api, tmp_path):
     sc = scenes("Fog over hills.")
-    p = av.Providers("cloudflare", image_model="flux-1-schnell", creds=CREDS, new_images=True)
+    p = av.Providers("final", image_model="flux-1-schnell", creds=CREDS, new_images=True)
     assert p.image_model == av.SQUARE_MODEL  # short names work
     av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p)
     [img] = api.image_calls()
@@ -447,7 +465,7 @@ def test_one_failed_shape_falls_back_to_the_other(api, tmp_path, monkeypatch):
         return {"image": jpeg_b64()}
     monkeypatch.setattr(av, "cf_run", cf)
     sc = scenes("One.")
-    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS)) == []
+    assert av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("final", creds=CREDS)) == []
     assert sc[0]["srcs"]["vertical"] == sc[0]["srcs"]["horizontal"]  # cropped from the 16:9 image
 
 
@@ -604,7 +622,7 @@ def test_redrawing_an_image_drops_its_old_parallax_mask_and_verdict(tmp_path, mo
 
 
 def test_check_passes_good_images_and_counts_neurons(vision, tmp_path):
-    p = av.Providers("cloudflare", creds=CREDS)
+    p = av.Providers("final", creds=CREDS)
     sc = scenes("A farmer at a stone channel.")
     av.generate_scene_visuals(sc, tmp_path / "p.json", providers=p, check=True, **ONE)
     [check] = vision.checks()
@@ -620,7 +638,7 @@ def test_check_passes_good_images_and_counts_neurons(vision, tmp_path):
 def test_failed_image_is_redrawn_until_it_passes(vision, tmp_path):
     vision.verdicts = [BAD, {"ok": True, "problems": [], "score": 8}]
     sc = scenes("A boy waves.")
-    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS), check=True,
+    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("final", creds=CREDS), check=True,
                               **ONE)
     assert len(vision.image_calls()) == 2 and len(vision.checks()) == 2
     assert "seed" in vision.image_calls()[1]  # the redraw uses a new seed
@@ -638,7 +656,7 @@ def test_still_failing_keeps_the_best_try_and_flags_it(vision, tmp_path, capsys,
     monkeypatch.setattr(sys.modules[__name__], "jpeg_b64", colour_jpeg)
     vision.verdicts = [WORSE, BAD, WORSE]  # the second try is the best
     sc = scenes("A boy waves.")
-    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("cloudflare", creds=CREDS), check=True,
+    av.generate_scene_visuals(sc, tmp_path / "p.json", providers=av.Providers("final", creds=CREDS), check=True,
                               **ONE)
     assert len(vision.image_calls()) == 1 + av.QC_RETRIES
     with Image.open(sc[0]["src"]) as img:
@@ -689,7 +707,7 @@ def test_prompt_writer_is_asked_for_simple_hand_poses():
 
 def test_redo_and_check_options():
     a = mv.parse_args(["s.txt", "--redo-scenes", "3, 7"])
-    assert a.redo == {2, 6} and a.generate_visuals and not a.check_images
+    assert a.redo == {2, 6} and a.generate_visuals and a.check_images  # checks are on by default
     assert mv.parse_args(["s.txt", "--check-images"]).vision_model == av.VISION_MODEL
     with pytest.raises(SystemExit):
         mv.parse_args(["s.txt", "--redo-scenes", "three"])

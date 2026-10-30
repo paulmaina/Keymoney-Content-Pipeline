@@ -1,7 +1,7 @@
 # %% [markdown]
-# # Real-ESRGAN upscaling for make_video.py --upscale
+# # Real-ESRGAN upscaling for make_video.py (every final render)
 #
-# `make_video.py --upscale` pushes this notebook to a private Kaggle kernel on its own, with a private dataset
+# Every final render of `make_video.py` pushes this notebook to a private Kaggle kernel on its own, with a private dataset
 # holding `job.json` and the scene images that are under 2048 px. You don't need to open it on the website.
 #
 # Each image is enlarged **2x** with **RealESRGAN_x2plus** (4x with RealESRGAN_x4plus if 2x would still be under
@@ -41,7 +41,7 @@ TILE, OVERLAP = 512, 16
 
 jobs = sorted(glob.glob("/kaggle/input/**/job.json", recursive=True))
 if not jobs:
-    raise SystemExit("No job.json under /kaggle/input: attach the dataset make_video.py --upscale uploaded.")
+    raise SystemExit("No job.json under /kaggle/input: attach the dataset make_video.py uploaded.")
 JOB_DIR = os.path.dirname(jobs[0])
 job = json.load(open(jobs[0], encoding="utf-8"))
 MIN_SIDE = job.get("min_side", 2048)

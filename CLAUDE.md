@@ -16,8 +16,10 @@ template in the same change; `tests/test_script_guide.py` checks the template st
 - Run Python with `.venv\Scripts\python` from the project root. Tests: `.venv\Scripts\python -m pytest -q` (no network calls;
   add tests that mock Cloudflare, Kaggle, Pexels and Pixabay).
 - Secrets live in `.env` (gitignored). Never print them, log them or ask the user to paste them; check presence by length only.
-- Cloudflare neurons (10,000 a day) and Kaggle GPU hours (~30 a week) are the user's free allowance: run `--check` before a
-  render, and ask before any Cloudflare or Kaggle work beyond what the user asked for.
+- Cloudflare is on the Workers Paid plan: 10,000 free neurons a day, then the user pays ($0.011 per 1,000) up to
+  `max-daily-neurons` (60,000 a day, Nairobi time). Kaggle GPU hours (~30 a week) are free but limited. Run `--check` before a
+  render (it shows the cost and the cap), and ask before any Cloudflare or Kaggle work beyond what the user asked for, or
+  before raising the cap. Pollinations is only for drafts, the emergency backup and brainstorming, never final images.
 - Only use reference voices the user has the right to use.
 - Commit only when the user asks.
 - Changes reach `main` only through a pull request: work on a branch, push the branch, open a PR against `main` with
