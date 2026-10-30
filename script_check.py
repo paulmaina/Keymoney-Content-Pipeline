@@ -89,8 +89,9 @@ def analyse(script, args):
         notes.append(f"{n_video} [video] scene(s); for {len(rows)} scenes aim for {lo}-{hi}")
 
     # Cloudflare: prompts and images not already saved/cached cost neurons
-    base = mv.output_base(args.output, script)
-    prompts_path = base.with_name(base.name + "_prompts.json")
+    import outputs
+    out = outputs.Outputs.for_script(args.output, script)
+    prompts_path = out.prompts
     saved = ai_visuals.load_prompt_records(prompts_path)
     sheet = ai_visuals.build_sheet(mv.parse_characters(script), ai_visuals.load_characters(prompts_path))
     cloudflare_images = args.image_provider in ("auto", "cloudflare")
@@ -158,7 +159,7 @@ def analyse(script, args):
     return {"script": script, "rows": rows, "flags": flags, "notes": notes, "sheet": sheet, "comments": comments,
             "declared": mv.parse_characters(script), "estimates": est, "upscale_minutes": upscale_min,
             "total_seconds": sum(r["seconds"] for r in rows), "words": sum(r["words"] for r in rows),
-            "prompts_path": prompts_path, "stock": stock_plan(scenes, args, base),
+            "prompts_path": prompts_path, "stock": stock_plan(scenes, args, out),
             "video_seconds": shorts.part_seconds(seconds, branding) if rows else 0.0, "parts": parts,
             "part_lines": shorts.describe(parts, seconds, sections, branding) if len(parts) > 1 else []}
 
@@ -178,16 +179,16 @@ def metadata_neurons(scenes, parts, args):
                for t in texts)
 
 
-def stock_plan(scenes, args, base):
+def stock_plan(scenes, args, out):
     """Which scenes would search Pexels / Pixabay (no network: from the keys, --media, '# media:' lines and
-    characters), and what the last run chose (from <name>_media.json)."""
+    characters), and what the last run chose (from Working/media.json)."""
     import json
     import stock
     keys = stock.keys(args.stock)
     declared = mv.parse_characters(args.script.resolve()) if getattr(args, "script", None) else {}
     plan = {i: stock.scene_mode(s, args.media, declared) for i, s in enumerate(scenes)}
     try:
-        last = {r["scene"]: r for r in json.loads(base.with_name(base.name + "_media.json").read_text(encoding="utf-8"))["scenes"]}
+        last = {r["scene"]: r for r in json.loads(out.media.read_text(encoding="utf-8"))["scenes"]}
     except (OSError, ValueError, KeyError, TypeError):
         last = {}
     return {"providers": list(keys), "search": [i + 1 for i, (m, _) in plan.items() if m in stock.THRESHOLD] if keys else [],

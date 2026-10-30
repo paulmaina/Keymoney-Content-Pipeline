@@ -113,9 +113,11 @@ def hours_cap(n):
     return min(MAX_HOURS, SETUP_HOURS + n * HOURS_PER_LINE)
 
 
-def synthesize(lines, cli=None, sleep=time.sleep, clock=time.monotonic, interval=kaggle_runner.POLL_SECONDS):
-    """lines: [(text, Settings)]. Generates every line that isn't cached in one Kaggle run.
+def synthesize(lines, cli=None, sleep=time.sleep, clock=time.monotonic, interval=kaggle_runner.POLL_SECONDS, work=None):
+    """lines: [(text, Settings)]. Generates every line that isn't cached in one Kaggle run. `work` holds the Kaggle job
+    files (the video's Working/kaggle/chatterbox); the audio always goes to the shared voice cache.
     Returns ({index: wav path} for the lines that exist now, GPU minutes or None)."""
+    work = Path(work) if work else WORK
     keyed = [(line_key(t, st), t, st) for t, st in lines]
     todo = list({k: (k, t, st) for k, t, st in keyed if not cached(k).exists()}.values())
     print(f"Chatterbox: {len(keyed)} line(s), {len(keyed) - sum(not cached(k).exists() for k, _, _ in keyed)} cached, "
@@ -123,10 +125,10 @@ def synthesize(lines, cli=None, sleep=time.sleep, clock=time.monotonic, interval
     used = None
     if todo:
         cli = cli or kaggle_runner.KaggleCLI(kaggle_runner.api_token("--engine chatterbox"))
-        job_dir = WORK / "job"
+        job_dir = work / "job"
         export_job(todo, job_dir)
         status, run_dir, used, watched = kaggle_runner.run_notebook(
-            cli, NOTEBOOK, SLUG, job_dir, WORK, hours_cap(len(todo)), sleep=sleep, clock=clock, interval=interval)
+            cli, NOTEBOOK, SLUG, job_dir, work, hours_cap(len(todo)), sleep=sleep, clock=clock, interval=interval)
         got, entries = collect(run_dir, [k for k, _, _ in todo])
         gpu = (f"about {used:.1f} min (session length from Kaggle's log)" if used is not None else
                f"at most {watched:.0f} min (how long the run was watched)")

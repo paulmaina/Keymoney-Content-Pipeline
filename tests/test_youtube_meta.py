@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import ai_visuals
+import outputs
 import make_video as mv
 import youtube_meta as ym
 
@@ -336,9 +337,9 @@ def test_write_without_credentials_uses_the_script(tmp_path, monkeypatch):
     p = script(tmp_path, "# HOOK\nNo electricity, no fridge.\n\n# HACK 1 NIGERIA\nClay pots keep food cool.\n\n"
                          "# OUTRO\nSubscribe for more.\n")
     scenes = [dict(s, dur=12.0, src=None) for s in mv.parse_script(p)]
-    md, thumb = ym.write(scenes, p, tmp_path / "s", args(), tmp_path, 36.0)
+    md, thumb = ym.write(scenes, p, outputs.Outputs(tmp_path / "s").make(), args(), tmp_path, 36.0)
     text = md.read_text(encoding="utf-8")
-    assert md.name == "s_youtube.md" and thumb.name == "s_thumbnail.jpg" and thumb.exists()
+    assert md.name == "youtube.md" and thumb.name == "thumbnail.jpg" and thumb.exists()
     assert "0:00 Hook\n0:12 Hack 1: Nigeria\n0:24 Outro" in text
     assert "## Tags" in text and "plain gradient" in text
 
@@ -369,7 +370,7 @@ def test_write_uses_the_metadata_model_and_prints_an_estimate(tmp_path, monkeypa
     monkeypatch.setattr(ai_visuals, "Providers", FakeProviders)
     p = script(tmp_path, "# HOOK\nNo electricity, no fridge.\n\n# HACK 1\nClay pots.\n\n# OUTRO\nBye.\n")
     scenes = [dict(s, dur=12.0, src=None) for s in mv.parse_script(p)]
-    md, _ = ym.write(scenes, p, tmp_path / "s", args(), tmp_path, 36.0)
+    md, _ = ym.write(scenes, p, outputs.Outputs(tmp_path / "s").make(), args(), tmp_path, 36.0)
     model, msgs, _ = FakeProviders.calls[-1]
     assert model == ai_visuals.METADATA_MODEL == mv.parse_args(["s.txt"]).metadata_model
     assert "0:12 Hack 1" in msgs[1]["content"]
@@ -394,6 +395,7 @@ def test_write_moves_chapters_after_an_intro(tmp_path, monkeypatch):
     monkeypatch.setattr(ai_visuals, "credentials", lambda required=True: None)
     p = script(tmp_path, "# HOOK\nNo electricity, no fridge.\n\n# HACK 1\nClay pots.\n\n# OUTRO\nBye.\n")
     scenes = [dict(s, dur=12.0, src=None) for s in mv.parse_script(p)]
-    md, _ = ym.write(scenes, p, tmp_path / "s", args(), tmp_path, 41.5, lead_in=1.73)
+    md, _ = ym.write(scenes, p, outputs.Outputs(tmp_path / "s").make(), args(), tmp_path, 41.5,
+                     lead_in=1.73)
     text = md.read_text(encoding="utf-8")
     assert "- 0:00 Hook\n- 0:13 Hack 1\n- 0:25 Outro" in text and "Length 0:41" in text

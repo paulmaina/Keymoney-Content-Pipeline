@@ -200,7 +200,7 @@ def test_video_tag_on_an_own_file_is_just_a_stronger_move(tmp_path):
 def test_check_counts_cached_prompts_and_images_as_free(tmp_path, monkeypatch):
     monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
     text = "Ama runs. The roots creak.\n\nGrandpa Kofi waves.\n"
-    prompts = tmp_path / "Exports" / "story_prompts.json"
+    prompts = tmp_path / "Exports" / "story" / "Working" / "prompts.json"
     prompts.parent.mkdir(parents=True)
     prompts.write_text(json.dumps({"scenes": [{"narration": "Ama runs. The roots creak.", "prompt": "a girl running"}]}))
     full = av.full_prompt("a girl running", "", "horizontal")
@@ -352,7 +352,7 @@ def test_mentioned_matches_any_distinctive_word_as_a_whole_word():
 def test_check_counts_redo_scenes_as_new_and_estimates_quality_checks(tmp_path, monkeypatch):
     monkeypatch.setattr(av, "GEN_DIR", tmp_path / "generated")
     text = "Ama runs.\n\nKofi waves.\n"
-    prompts = tmp_path / "Exports" / "story_prompts.json"
+    prompts = tmp_path / "Exports" / "story" / "Working" / "prompts.json"
     prompts.parent.mkdir(parents=True)
     prompts.write_text(json.dumps({"scenes": [{"narration": "Ama runs.", "prompt": "a girl running"},
                                               {"narration": "Kofi waves.", "prompt": "an old man"}]}))

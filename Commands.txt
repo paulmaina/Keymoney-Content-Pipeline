@@ -110,7 +110,7 @@ Short example:
    allowance the images need (section 5). If it's more than one day, do step 6a first.
 5. Optional: review the image prompts first (costs only ~50 neurons a scene):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --prompts-only
-   Edit Exports\MyVideo_prompts.json or the # Visuals lines, then carry on.
+   Edit Exports\MyVideo\Working\prompts.json or the # Visuals lines, then carry on.
 6a. Several days of Cloudflare? Make the visuals first, once a day, until --check shows 0 new images:
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --visuals-only
 6. Render:
@@ -118,31 +118,37 @@ Short example:
    That's the whole command: stock or AI visuals, image checks, upscaling, the Chatterbox voice, captions, the full
    horizontal video, the vertical Shorts series and the YouTube notes. An 8-minute video takes roughly an hour to render
    (--check estimates it), plus Kaggle queueing.
-7. Review the outputs in Exports\:
-       MyVideo_horizontal.mp4    1920x1080, for YouTube
-       MyVideo_vertical_part1.mp4, _part2.mp4, ...
+7. Review the outputs. Each video has its own folder, named after the script (the run prints its Upload path):
+   Exports\MyVideo\Upload\      only what you upload to YouTube
+       MyVideo.mp4               1920x1080, the full video
+       MyVideo_Short_Part1.mp4, MyVideo_Short_Part2.mp4, ...
                                  1080x1920 Shorts, each under 2:50: "Part 1 of N" at the start, "Watch Part 2" at
-                                 the end (a script that fits in one Short gives a single MyVideo_vertical.mp4)
+                                 the end (a script that fits in one Short gives a single MyVideo_Short.mp4)
+       thumbnail.jpg             1280x720 thumbnail
+       youtube.md                titles, descriptions, chapters, tags, hashtags; plus a section per Short
+   Exports\MyVideo\Working\     everything else
        MyVideo.srt               captions for the full video
-       MyVideo_vertical_partN.srt  captions for each Short, timed for that part
-       MyVideo_youtube.md        title options, description with chapters, tags, hashtags; plus a section per Short
-       MyVideo_thumbnail.jpg     1280x720 thumbnail
-       MyVideo_prompts.json      the image prompts and character sheet (edit, then rerun)
-       MyVideo_media.json        which scenes use stock, from where, and the creators to credit
+       MyVideo_Short_PartN.srt   captions for each Short, timed for that part
+       prompts.json              the image prompts and character sheet (edit, then rerun)
+       media.json                which scenes use stock, from where, and the creators to credit
+       image_checks.json         the quality check's verdict for each image
+       log.txt                   everything each run printed
+       kaggle\, render\          Kaggle job files and temporary render files
+   Images, upscaled images, stock media and voice lines stay in the shared generated\ caches, so nothing is redrawn.
    Watch both videos. Look for extra fingers or limbs (the log lists images the check flagged), wrong people, a
    stock clip that doesn't fit, captions or labels over a face, and mispronounced words.
 8. Fix what's wrong and rerun (only the changed parts are redone):
        a bad image:          --redo-scenes "3,7"
        a bad stock pick:     add "# media: ai" to that scene
-       a wrong shot:         edit its # Visuals line (or its prompt in _prompts.json)
+       a wrong shot:         edit its # Visuals line (or its prompt in Working\prompts.json)
        a mispronounced word: spell it the way it's said in the narration
-9. Upload with MyVideo_youtube.md:
+9. Upload everything in Exports\MyVideo\Upload\, using youtube.md:
    - Pick one of the 3 titles; paste the description (it has the chapters, the AI/stock note and the stock credits)
      and the tags.
-   - Upload MyVideo_thumbnail.jpg as the thumbnail.
+   - Upload thumbnail.jpg as the thumbnail.
    - Under "Altered or synthetic content", answer YES (realistic AI images and an AI voice).
-   - Upload the full horizontal video first and copy its link.
-   - Then upload the Shorts in order (part1, part2, ...). Each has its own section in MyVideo_youtube.md: a title ending
+   - Upload MyVideo.mp4 (the full video) first and copy its link.
+   - Then upload the Shorts in order (Part1, Part2, ...). Each has its own section in youtube.md: a title ending
      "(Part 2/5)", a description (replace FULL_VIDEO_LINK with the full video's link) and tags. In YouTube Studio, set
      the full video as each Short's "Related video".
 
@@ -155,15 +161,16 @@ Planning
     --check                     Scene list, word counts, estimated length, flags, the Cloudflare neurons, Kaggle
                                 time and render time. Changes nothing, no network. Add any options you'll render with
                                 (e.g. --check --new-images) to see their cost.
-    --prompts-only              Write Exports\MyVideo_prompts.json, then stop.
+    --prompts-only              Write Exports\MyVideo\Working\prompts.json, then stop.
     --visuals-only              Make and cache the prompts and images (checks, stock, upscaling), then stop before the
                                 voice and video. For scripts that need several days of Cloudflare: once a day, then render.
 
 Rendering
     (no options)                The full render with your make_video.toml defaults.
     --format vertical           Only the vertical Shorts (or horizontal; default both). Halves the image cost.
-    -o Exports\MyVideo_v2       Different output names. NOTE: prompts are saved per output name, so a new -o writes
-                                new prompts and images. Script2's realistic render was saved as -o Exports\Script2_realistic.
+    -o MyVideo_v2               A different folder and name (default: the script's name): Exports\MyVideo_v2\.
+                                NOTE: prompts are saved per folder, so a new -o writes new prompts (images are reused
+                                when the prompt is the same).
     --no-metadata               Skip the YouTube notes and thumbnail.
     --music "Raw Footage\song.mp3"   Background music, ducked under the voice.
 
@@ -277,11 +284,11 @@ A real person (e.g. Sonam Wangchuk) doesn't look right
     then --redo-scenes "N". Real people are never drawn as their actual likeness.
 
 A stock clip doesn't match the scene
-    Add "# media: ai" to that paragraph and rerun. Exports\MyVideo_media.json shows each pick and its score.
+    Add "# media: ai" to that paragraph and rerun. Exports\MyVideo\Working\media.json shows each pick and its score.
 
 "The style changed ... every prompt is written again" in --check
     The style in make_video.toml or .env differs from the one the saved prompts were written for, or you used a new
-    -o name. Use the old -o name to reuse its prompts and images.
+    -o name. Use the old -o name (or none, for the script's own folder) to reuse its prompts and images.
 
 Wrong or missing place label / map
     Add "# location: Place, Country" (or "# location: none") to that scene.

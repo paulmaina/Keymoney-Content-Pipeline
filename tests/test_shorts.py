@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import captions
+import outputs
 import make_video as mv
 import remotion_render as rr
 import script_check
@@ -85,14 +86,14 @@ def test_describe_lists_scene_ranges_lengths_and_chapters():
 # ---------- rendering ----------
 
 def test_cuts_full_horizontal_and_numbered_vertical_parts(tmp_path):
-    base = tmp_path / "vid"
+    base = outputs.Outputs(tmp_path / "vid")
     scenes = [{"text": "x"}] * 6
     cuts = rr.plan_cuts(scenes, ["horizontal", "vertical"], base, [(0, 3), (3, 6)])
     assert [(f, a, b, p, o.name) for f, a, b, p, o in cuts] == [
-        ("horizontal", 0, 6, None, "vid_horizontal.mp4"),
-        ("vertical", 0, 3, (1, 2), "vid_vertical_part1.mp4"), ("vertical", 3, 6, (2, 2), "vid_vertical_part2.mp4")]
+        ("horizontal", 0, 6, None, "vid.mp4"),
+        ("vertical", 0, 3, (1, 2), "vid_Short_Part1.mp4"), ("vertical", 3, 6, (2, 2), "vid_Short_Part2.mp4")]
     one = rr.plan_cuts(scenes, ["vertical"], base, [(0, 6)])
-    assert [(o.name, p) for *_, p, o in one] == [("vid_vertical.mp4", None)]  # one part: a plain vertical video
+    assert [(o.name, p) for *_, p, o in one] == [("vid_Short.mp4", None)]  # one part: a single Short
 
 
 def test_shift_chunks_keeps_a_part_s_words_retimed():
@@ -136,8 +137,9 @@ def test_render_all_renders_each_part_from_its_own_scenes_audio_and_captions(tmp
     font = tmp_path / "f.ttf"
     font.write_bytes(b"x")
     outs, lead, total = rr.render_all(scenes, tmp_path / "work", tmp_path / "narration.wav", chunks, font, args,
-                                      ["horizontal", "vertical"], tmp_path / "vid", p, parts=[(0, 2), (2, 4)])
-    assert [o.name for o in outs] == ["vid_horizontal.mp4", "vid_vertical_part1.mp4", "vid_vertical_part2.mp4"]
+                                      ["horizontal", "vertical"], outputs.Outputs(tmp_path / "vid").make(), p,
+                                      parts=[(0, 2), (2, 4)])
+    assert [o.name for o in outs] == ["vid.mp4", "vid_Short_Part1.mp4", "vid_Short_Part2.mp4"]
     full, one, two = props["horizontal_silent.mp4"], props["vertical_part1_silent.mp4"], props["vertical_part2_silent.mp4"]
     assert len(full["scenes"]) == 4 and full["part"] is None
     assert (len(one["scenes"]), one["part"]) == (2, {"index": 1, "count": 2})
@@ -155,11 +157,11 @@ def test_render_all_renders_each_part_from_its_own_scenes_audio_and_captions(tmp
 def test_ffmpeg_renderer_cuts_the_vertical_video_into_parts(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(mv, "run", lambda cmd, cwd=None: calls.append([str(c) for c in cmd]) or "")
-    video = tmp_path / "vid_vertical.mp4"
+    video = tmp_path / "vid_Short.mp4"
     video.write_bytes(b"x")
     scenes = [{"dur": d} for d in (10.0, 20.0, 30.0)]
-    outs = mv.cut_parts(video, scenes, [(0, 2), (2, 3)], tmp_path / "vid")
-    assert [o.name for o in outs] == ["vid_vertical_part1.mp4", "vid_vertical_part2.mp4"] and not video.exists()
+    outs = mv.cut_parts(video, scenes, [(0, 2), (2, 3)], outputs.Outputs(tmp_path / "vid"))
+    assert [o.name for o in outs] == ["vid_Short_Part1.mp4", "vid_Short_Part2.mp4"] and not video.exists()
     assert [(c[c.index("-ss") + 1], c[c.index("-t") + 1]) for c in calls] == [("0.000", "30.000"), ("30.000", "30.000")]
 
 
@@ -219,8 +221,8 @@ def test_each_part_gets_titles_description_and_tags_linking_the_full_video(tmp_p
         assert ym.FULL_LINK in m["description"] and "#Shorts" in m["description"] and "Chapters" not in m["description"]
         assert m["tags"]
     assert "Next: Part 2." in metas[0]["description"] and "Next: Part" not in metas[1]["description"]
-    md = ym.shorts_markdown(tmp_path / "vid", metas, "Village Water Hacks")
-    assert "## Shorts series: 2 parts" in md and "vid_vertical_part2.mp4" in md and "Related video" in md
+    md = ym.shorts_markdown(outputs.Outputs(tmp_path / "vid"), metas, "Village Water Hacks")
+    assert "## Shorts series: 2 parts" in md and "vid_Short_Part2.mp4" in md and "Related video" in md
 
 
 # ---------- review fixes: frame timeline, per-part subtitles, voice checks ----------
@@ -248,9 +250,9 @@ def test_ffmpeg_scenes_are_encoded_to_the_frames_the_cuts_use(tmp_path, monkeypa
     frames = [int(c[c.index("-frames:v") + 1]) for c in calls if "-frames:v" in c]
     assert len(frames) == 30 and "-t" not in calls[0] and sum(frames[:15]) == mv.frame_edges([1.01] * 30)[15]
     calls.clear()
-    video = tmp_path / "vid_vertical.mp4"
+    video = tmp_path / "vid_Short.mp4"
     video.write_bytes(b"x")
-    mv.cut_parts(video, scenes, [(0, 15), (15, 30)], tmp_path / "vid")
+    mv.cut_parts(video, scenes, [(0, 15), (15, 30)], outputs.Outputs(tmp_path / "vid"))
     ss = float(calls[1][calls[1].index("-ss") + 1])
     assert ss == pytest.approx(sum(frames[:15]) / mv.FPS, abs=0.001)  # part 2 opens exactly on scene 16's first frame
 
@@ -261,14 +263,15 @@ def test_each_short_gets_its_own_retimed_srt(tmp_path):
     chunks = [[W("No", 0.1, 0.4), W("fridge.", 0.5, 0.9)], [W("In", 10.2, 10.4), W("Kenya,", 10.5, 11.0)],
               [W("In", 22.3, 22.5), W("Iran,", 22.6, 23.0)]]
     lead = (rr.INTRO - rr.TRANSITION // 2) / mv.FPS
-    one, two = mv.write_part_srts(chunks, scenes, [(0, 2), (2, 3)], tmp_path / "vid", "remotion", lead)
-    assert (one.name, two.name) == ("vid_vertical_part1.srt", "vid_vertical_part2.srt")
+    one, two = mv.write_part_srts(chunks, scenes, [(0, 2), (2, 3)], outputs.Outputs(tmp_path / "vid").make(),
+                                     "remotion", lead)
+    assert (one.name, two.name) == ("vid_Short_Part1.srt", "vid_Short_Part2.srt")
     text = two.read_text(encoding="utf-8")
     assert text.startswith(f"1\n{mv.srt_time(0.3 + lead)} --> {mv.srt_time(1.0 + lead)}\nIn Iran,")
     assert "Kenya" not in text and "fridge" not in text
     assert "No fridge." in one.read_text(encoding="utf-8") and "Iran" not in one.read_text(encoding="utf-8")
     # the ffmpeg renderer: no intro, and the part starts on its frame boundary
-    flat = mv.write_part_srts(chunks, [{"dur": 1.01}] * 22 + [{"dur": 11.0}], [(0, 22), (22, 23)], tmp_path / "f",
+    flat = mv.write_part_srts(chunks, [{"dur": 1.01}] * 22 + [{"dur": 11.0}], [(0, 22), (22, 23)], outputs.Outputs(tmp_path / "f").make(),
                               "ffmpeg", 0.0)
     start = mv.frame_edges([1.01] * 22 + [11.0])[22] / mv.FPS
     assert flat[1].read_text(encoding="utf-8").startswith(f"1\n{mv.srt_time(22.3 - start)}")

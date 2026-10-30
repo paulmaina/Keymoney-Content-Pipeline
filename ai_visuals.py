@@ -12,7 +12,7 @@ Models that take a width and height (all but FLUX.1 schnell) draw a real 16:9 im
 video and a real 9:16 one for the vertical video, so nothing important is cropped away. FLUX.1 schnell
 only makes squares, which the renderers crop to each format.
 
-Prompts are saved to Exports/<name>_prompts.json for review and editing (rewritten when the style changes).
+Prompts are saved to Exports/<name>/Working/prompts.json for review and editing (rewritten when the style changes).
 Images are cached in generated/ (keyed by prompt + size + provider model) and any provider's cached image
 is reused, so reruns don't spend quota.
 """
@@ -361,6 +361,18 @@ def load_verdict(image):
 
 def save_verdict(image, verdict):
     qc_path(image).write_text(json.dumps(verdict, ensure_ascii=False), encoding="utf-8")
+
+
+def write_check_report(scenes, path):
+    """The video's Working/image_checks.json: each scene's quality-check verdict per format. The verdicts themselves stay
+    cached next to the images in generated/, so a new video folder never pays for a check twice."""
+    rows = []
+    for i, s in enumerate(scenes, 1):
+        for fmt, image in (s.get("srcs") or {}).items():
+            if (v := load_verdict(image)) is not None:
+                rows.append({"scene": i, "format": fmt, "image": str(image), **v})
+    Path(path).write_text(json.dumps({"checks": rows}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 def parse_verdict(reply):

@@ -18,7 +18,7 @@ the threshold (or whose providers fail or are rate-limited) falls back to the Cl
 
 Searches are cached for 24 hours (Pixabay's terms ask for it) and downloads for good, in generated/stock/. Rate limits
 are read from the response headers and remembered between runs. Each scene's choice, provider, creator and link go
-to Exports/<name>_media.json, and the YouTube description credits them.
+to Exports/<name>/Working/media.json, and the YouTube description credits them.
 """
 import hashlib
 import json
@@ -498,7 +498,7 @@ def credit(c, fmt, seconds):
 
 
 def write_media_json(scenes, plan, path):
-    """Exports/<name>_media.json: what each scene shows and where it came from."""
+    """Working/media.json: what each scene shows and where it came from."""
     rows = []
     for i, s in enumerate(scenes):
         mode, reason = plan.get(i, ("ai", ""))

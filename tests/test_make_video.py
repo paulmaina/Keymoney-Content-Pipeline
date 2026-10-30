@@ -1,4 +1,4 @@
-﻿"""Unit tests for make_video.py. None of these need ffmpeg or network access."""
+"""Unit tests for make_video.py. None of these need ffmpeg or network access."""
 from pathlib import Path
 
 import pytest
@@ -147,10 +147,16 @@ def test_align_handles_empty_input():
 
 # ---------- small helpers ----------
 
-def test_output_base_strips_mp4_and_defaults_to_exports(tmp_path):
-    script = tmp_path / "promo.txt"
-    assert mv.output_base(None, script) == (mv.ROOT / "Exports" / "promo").resolve()
-    assert mv.output_base(tmp_path / "out" / "final.mp4", script) == tmp_path / "out" / "final"
+def test_each_video_gets_a_folder_named_after_the_script_or_o(tmp_path):
+    import outputs
+    script = tmp_path / "Promo.txt"
+    out = outputs.Outputs.for_script(None, script)
+    assert out.folder == mv.ROOT / "Exports" / "Promo" and out.name == "Promo"
+    assert outputs.Outputs.for_script(Path("Launch"), script).folder == mv.ROOT / "Exports" / "Launch"  # a plain name
+    assert outputs.Outputs.for_script(tmp_path / "videos" / "Final", script).folder == tmp_path / "videos" / "Final"
+    assert out.video("horizontal") == out.upload / "Promo.mp4" and out.short(2) == out.upload / "Promo_Short_Part2.mp4"
+    assert (out.thumbnail.name, out.youtube.name) == ("thumbnail.jpg", "youtube.md") and out.thumbnail.parent == out.upload
+    assert {p.parent for p in (out.prompts, out.media, out.checks, out.srt, out.short_srt(1), out.log)} == {out.working}
 
 
 def test_vertical_flag_is_alias_for_format():

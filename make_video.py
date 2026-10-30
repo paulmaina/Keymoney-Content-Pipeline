@@ -1,12 +1,13 @@
 """Turn a text script into narrated videos with burned-in captions.
 
-By default both formats are rendered from one narration and one caption track:
-  Exports/<name>_horizontal.mp4   1920x1080 for YouTube / Facebook
-  Exports/<name>_vertical_partN.mp4  1080x1920 Shorts, the script split into parts under 2:50 (shorts.py);
-                                  a script that fits in one is a single <name>_vertical.mp4
-  Exports/<name>.srt              caption file (same timings for both)
-  Exports/<name>_youtube.md       title options, description with chapters, tags (--no-metadata skips)
-  Exports/<name>_thumbnail.jpg    1280x720 thumbnail
+Each video gets its own folder, Exports/<name>/ (<name> = the script's name, or -o; see outputs.py):
+  Upload/<name>.mp4                 1920x1080, the full video for YouTube
+  Upload/<name>_Short_Part1.mp4 ...  1080x1920 Shorts: the script split into parts under 2:50 (shorts.py);
+                                    a script that fits in one gives a single <name>_Short.mp4
+  Upload/thumbnail.jpg              1280x720 thumbnail
+  Upload/youtube.md                 titles, descriptions, chapters and tags, a section per Short (--no-metadata skips)
+  Working/                          prompts.json, media.json, image_checks.json, captions (.srt), log.txt, Kaggle job
+                                    files and temporary renders
 
 Rendering (--renderer): remotion (default; remotion_render.py and remotion/) animates stills with eased pans, zooms and
 subtle parallax, crossfades, animated captions, place labels, a world map and a branded intro/outro. ffmpeg is the fast,
@@ -209,14 +210,6 @@ def assign_visuals(scenes, script_dir, use_pool=True):
             s["src"] = pool[i % len(pool)] if pool else None
 
 
-def output_base(output, script):
-    """Base path for outputs; _horizontal/_vertical and .srt are added to it."""
-    base = (Path(output) if output else ROOT / "Exports" / script.stem).resolve()
-    if base.suffix.lower() == ".mp4":
-        base = base.with_suffix("")
-    return base
-
-
 # ---------- voice over ----------
 
 def tts_edge(text, out, voice, rate):
@@ -259,7 +252,8 @@ def tts_kokoro(text, out, voice, speed):
 def chatterbox_or_fallback(scenes, args):
     """Chatterbox lines from Kaggle ({index: wav}), or None after switching args to the Edge fallback voice."""
     import chatterbox_tts
-    lines = chatterbox_tts.narrate_lines(scenes, args)
+    lines = chatterbox_tts.narrate_lines(scenes, args, **({"work": args.kaggle_work}
+                                                           if getattr(args, "kaggle_work", None) else {}))
     if lines is None:
         args.engine = "edge"
         if not (args.voice or "").endswith("Neural"):
@@ -529,18 +523,16 @@ def render_format(fmt, scenes, work, narration, srt, font_path, args, out):
     return mux("video.mp4", narration, args, out, cwd=fwork, filters=vf)
 
 
-def cut_parts(video, scenes, parts, base):
+def cut_parts(video, scenes, parts, out):
     """--renderer ffmpeg: the vertical video cut into its Shorts parts at scene boundaries, on the frame timeline the
     scenes were encoded on (re-encoded, so the cuts are exact); the full-length vertical file is removed."""
-    import shorts
     starts = part_starts(scenes, "ffmpeg")
     outs = []
     for k, (a, b) in enumerate(parts, 1):
-        out = shorts.part_path(base, k)
         run(["ffmpeg", "-y", "-ss", f"{starts[a]:.3f}", "-t", f"{starts[b] - starts[a]:.3f}", "-i", video,
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-             out])
-        outs.append(out)
+             out.short(k)])
+        outs.append(out.short(k))
     video.unlink(missing_ok=True)
     return outs
 
@@ -554,17 +546,16 @@ def part_starts(scenes, renderer):
     return [sum(durations[:i]) for i in range(len(durations) + 1)]
 
 
-def write_part_srts(chunks, scenes, parts, base, renderer, lead_in):
-    """One .srt per Short (<name>_vertical_partN.srt): only that part's words, timed from the part's own start plus its
-    intro (lead_in), so it lines up when uploaded with the part."""
+def write_part_srts(chunks, scenes, parts, out, renderer, lead_in):
+    """One .srt per Short (Working/<name>_Short_PartN.srt): only that part's words, timed from the part's own start plus
+    its intro (lead_in), so it lines up when uploaded with the part."""
     import remotion_render
-    import shorts
     starts = part_starts(scenes, renderer)
     outs = []
     for k, (a, b) in enumerate(parts, 1):
         part = remotion_render.shift_chunks(chunks, starts[a], starts[b])
         moved = [[Word(w.text, w.start + lead_in, w.end + lead_in) for w in c] for c in part]
-        outs.append(write_srt(moved, shorts.part_path(base, k).with_suffix(".srt")))
+        outs.append(write_srt(moved, out.short_srt(k)))
     return outs
 
 
@@ -615,8 +606,8 @@ def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("script", type=Path)
     ap.add_argument("-o", "--output", type=Path,
-                    help="base name for outputs, e.g. Exports\\promo -> promo_horizontal.mp4 "
-                         "(default: Exports\\<script name>)")
+                    help="the video's folder and name: a name (Promo -> Exports\\Promo\\Upload\\Promo.mp4) or a folder "
+                         "path. Default: the script's name")
     ap.add_argument("--format", choices=["both", *FORMATS], default="both",
                     help="which video(s) to render (default: both)")
     ap.add_argument("--vertical", action="store_true", help=argparse.SUPPRESS)  # deprecated
@@ -655,7 +646,7 @@ def parse_args(argv=None):
                     help="make and cache the prompts and images (with their checks, stock and --upscale), then stop "
                          "before the voice and video: for scripts that need several days of Cloudflare allowance")
     ap.add_argument("--prompts-only", action="store_true",
-                    help="write Exports/<name>_prompts.json for review, then stop (no images, audio or video)")
+                    help="write Exports/<name>/Working/prompts.json for review, then stop (no images, audio or video)")
     ap.add_argument("--regenerate", action="store_true",
                     help="ignore cached images and saved prompts for this run (rewrites your edited prompts)")
     ap.add_argument("--new-images", action="store_true",
@@ -690,8 +681,8 @@ def parse_args(argv=None):
     ap.add_argument("--whisper-model", default="base", help="tiny/base/small/medium")
     ap.add_argument("--caption-words", type=int, default=6, help="max words per caption line")
     ap.add_argument("--no-metadata", action="store_true",
-                    help="don't write Exports/<name>_youtube.md (titles, description, chapters, tags) "
-                         "and <name>_thumbnail.jpg after rendering")
+                    help="don't write Upload/youtube.md (titles, description, chapters, tags) "
+                         "and Upload/thumbnail.jpg after rendering")
     ap.add_argument("--metadata-model", default=ai_visuals.METADATA_MODEL,
                     help="Workers AI model that writes the YouTube titles, description and tags (~65 neurons)")
     ap.add_argument("--channel", default="Smart Village Boy", help="channel name used in the YouTube metadata")
@@ -746,8 +737,14 @@ def main():
         sys.exit("Script has no text.")
     assign_visuals(scenes, script.parent, use_pool=not args.generate_visuals)
 
-    base = output_base(args.output, script)
-    base.parent.mkdir(parents=True, exist_ok=True)
+    import outputs
+    out = outputs.Outputs.for_script(args.output, script).make()
+    with outputs.Tee(out.log):
+        produce(args, script, scenes, font_path, out)
+
+
+def produce(args, script, scenes, font_path, out):
+    """Visuals, voice, captions, the videos and the YouTube notes, into the video's folder (`out`: outputs.Outputs)."""
     formats = list(FORMATS) if args.format == "both" else [args.format]
     failed_visuals = []
     if args.generate_visuals:
@@ -764,18 +761,20 @@ def main():
             plan = stock.fill_stock(scenes, formats, args.media, args.stock, providers,
                                     script_check.estimated_seconds(scenes, args), parse_characters(script))
         failed_visuals = ai_visuals.generate_scene_visuals(
-            scenes, base.with_name(base.name + "_prompts.json"), style=args.style, regenerate=args.regenerate,
+            scenes, out.prompts, style=args.style, regenerate=args.regenerate,
             prompts_only=args.prompts_only, provider=args.image_provider, providers=providers,
             characters=parse_characters(script), formats=formats, redo=args.redo, check=args.check_images)
         if args.prompts_only:
             print("Prompts only: review and edit the file above, then rerun with --generate-visuals.")
             return
-        stock.write_media_json(scenes, plan, base.with_name(base.name + "_media.json"))
+        stock.write_media_json(scenes, plan, out.media)
+        if args.check_images:
+            ai_visuals.write_check_report(scenes, out.checks)
     elif args.regenerate:
         print("Note: --regenerate only applies with --generate-visuals.")
     if args.upscale:
         import upscale
-        upscale.upscale_scenes(scenes, formats)
+        upscale.upscale_scenes(scenes, formats, work=out.kaggle("upscale"))
     if args.visuals_only:
         missing = f" Still missing: scene(s) {', '.join(map(str, failed_visuals))}." if failed_visuals else ""
         print(f"Visuals only: prompts and images are saved and cached; no voice or video was made.{missing} "
@@ -783,9 +782,10 @@ def main():
         return
     if args.engine == "kokoro":  # voice prerequisites only now: --visuals-only and --prompts-only never need them
         check_kokoro_model()
-    work = base.parent / f".work_{base.name}"
+    work = out.render
     shutil.rmtree(work, ignore_errors=True)
-    work.mkdir()
+    work.mkdir(parents=True)
+    args.kaggle_work = out.kaggle("chatterbox")
 
     print(f"{len(scenes)} scenes. Generating voice over ({args.engine})...")
     narration = narrate(scenes, work, args)
@@ -806,24 +806,22 @@ def main():
     if args.renderer == "remotion":
         import remotion_render
         outs, lead_in, total = remotion_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
-                                                          base, script, parts)
+                                                          out, script, parts)
     else:
-        outs = [render_format(fmt, scenes, work, narration, srt, font_path, args,
-                              base.with_name(f"{base.name}_{fmt}.mp4")) for fmt in formats]
+        outs = [render_format(fmt, scenes, work, narration, srt, font_path, args, out.video(fmt)) for fmt in formats]
         if len(parts) > 1:  # the plain renderer has no intro or outro, so the parts are cut from the full video
-            outs = [o for o in outs if o.name != f"{base.name}_vertical.mp4"] + cut_parts(
-                base.with_name(f"{base.name}_vertical.mp4"), scenes, parts, base)
+            outs = [o for o in outs if o != out.video("vertical")] + cut_parts(out.video("vertical"), scenes, parts, out)
     part_srts = []
     if srt:  # the uploadable caption file, on the video's own timeline (after any intro)
-        shift_srt(srt, lead_in, base.with_name(base.name + ".srt"))
+        shift_srt(srt, lead_in, out.srt)
         if len(parts) > 1:  # every Short starts at 0:00 with its own intro, so each gets its own retimed captions
-            part_srts = write_part_srts(chunks, scenes, parts, base, args.renderer, lead_in)
+            part_srts = write_part_srts(chunks, scenes, parts, out, args.renderer, lead_in)
 
     meta = None
     if not args.no_metadata:
         import youtube_meta
         try:
-            meta = youtube_meta.write(scenes, script, base, args, work, total, lead_in=lead_in,
+            meta = youtube_meta.write(scenes, script, out, args, work, total, lead_in=lead_in,
                                       parts=parts if len(parts) > 1 else None)
         except Exception as e:  # the videos are done; never lose them over the upload notes
             print(f"YouTube metadata failed ({e.__class__.__name__}: {e}); the videos are fine. "
@@ -832,14 +830,13 @@ def main():
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     print("Done:")
-    for out in outs:
-        print(f"  {out} ({duration(out):.1f}s)")
-    if srt:
-        print(f"  {base.with_name(base.name + '.srt')}")
-    for path in part_srts:
-        print(f"  {path}")
+    for video in outs:
+        print(f"  {video} ({duration(video):.1f}s)")
     for path in meta or []:
         print(f"  {path}")
+    if srt:
+        print(f"  captions: {out.srt}" + (f" and {len(part_srts)} Short captions" if part_srts else ""))
+    print(f"Ready to upload: {out.upload}")
     if failed_visuals:
         print(f"Image generation failed for scene(s) {', '.join(map(str, failed_visuals))}; "
               "they use title cards. Rerun later to retry (successful images are cached).")
