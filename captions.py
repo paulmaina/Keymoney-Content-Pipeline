@@ -172,13 +172,16 @@ def frame_faces(image, fmt, min_height=0.0, margin=FACE_MARGIN):
 
 
 def scene_faces(scenes, fmt, **kw):
+    """Face bands per scene: both shots' faces when the scene has a second shot, so a line clears either picture."""
     out = []
     for s in scenes:
-        src = mv.scene_src(s, fmt)
-        try:
-            out.append(frame_faces(src, fmt, **kw) if src and Path(src).suffix.lower() in mv.IMAGE_EXT else [])
-        except OSError:
-            out.append([])
+        bands = []
+        for src in (mv.scene_src(s, fmt), mv.scene_src2(s, fmt)):
+            try:
+                bands += frame_faces(src, fmt, **kw) if src and Path(src).suffix.lower() in mv.IMAGE_EXT else []
+            except OSError:
+                pass
+        out.append(bands)
     return out
 
 

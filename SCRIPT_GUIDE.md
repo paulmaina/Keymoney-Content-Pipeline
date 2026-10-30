@@ -241,23 +241,26 @@ estimate until a full narration is measured; `--check` uses the current figure.)
   scenes), so a chapter fits in one Short and never has to be cut in the middle. `--check` lists every part with its scenes,
   chapters and length.
 
-**Cloudflare cost.** Images are free up to 10,000 Cloudflare "neurons" a day. Each new scene costs about **390 neurons**:
+**Cloudflare cost.** Images are free up to 10,000 Cloudflare "neurons" a day. Each new scene costs about **390 neurons**
+for one shot. Scenes longer than 6 seconds also get a **second shot** of the same moment from another angle or distance
+(on by default), which roughly doubles that scene to about **770 neurons**:
 
 | Item | Neurons |
 |---|---|
 | Image prompt | ~46 |
 | Two images (horizontal and vertical) | ~264 |
 | Two quality checks | ~81 |
+| Second shot (scenes over 6 s): its prompt, two images and two checks | ~380 |
 | YouTube notes: the full video, plus one per Short (upper estimate) | ~110 + ~95 each |
 
-So a first render takes about:
+With 2–3 sentences, nearly every scene runs over 6 seconds, so a first render takes about:
 
-| Scenes | Neurons | Days of free allowance |
-|---|---|---|
-| 25 | ~10,000 | 1–2 |
-| 50 | ~20,000 | 2 |
-| 60 | ~24,000 | 3 |
-| 75 | ~30,000 | 3 |
+| Scenes | With second shots (default) | Days | With `--no-two-shots` | Days |
+|---|---|---|---|---|
+| 25 | ~19,000 | 2 | ~10,000 | 1–2 |
+| 50 | ~39,000 | 4 | ~20,000 | 2 |
+| 60 | ~47,000 | 5 | ~24,000 | 3 |
+| 75 | ~58,000 | 6 | ~30,000 | 3 |
 
 - **Several days:** when a script needs more than one day's allowance, `--check` says how many days. Run the render command
   with `--visuals-only` once a day. Each day's images are cached, so the next day carries on where it stopped. When `--check`
@@ -265,7 +268,8 @@ So a first render takes about:
 - **Redraws:** each image that fails the quality check and is redrawn adds ~173 neurons.
 - **Stock:** scenes that end up using stock footage don't need AI images, so they cost almost nothing.
 - **Reruns:** cached scenes are free, so changing one scene's narration or Visuals line only costs that scene.
-- **To save neurons:** `--no-check-images` drops the checks (about 310 neurons a scene).
+- **To save neurons:** `--no-two-shots` halves the cost (one picture per scene); `--no-check-images` drops the checks.
+  Writing a few scenes as one short sentence (under 6 seconds) also keeps them to one shot.
 
 
 ## 5. Fact-check checklist
@@ -296,7 +300,8 @@ This exact text is in `Scripts/TEMPLATE.txt` and passes `--check` with no flags 
 - 55 scenes and about 1,220 words, so about 8:09 with the intro and outro
 - 7 `[video]` scenes and 7 chapters
 - a vertical series of 4 Shorts, cut only at chapter headings
-- about 21,900 neurons, which is 3 days of Cloudflare allowance
+- about 42,700 neurons with second shots, which is 5 days of Cloudflare allowance, or 21,900 (3 days) with
+  `--no-two-shots`
 The facts were chosen from well-documented examples, but **fact-check them (section 5) before using this script
 for a real video**.
 

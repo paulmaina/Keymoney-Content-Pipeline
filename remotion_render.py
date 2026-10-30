@@ -51,6 +51,26 @@ MOVES = {
 }
 PARALLAX_MOVES = ("zoom-in", "push-left", "push-right", "zoom-out")  # depth reads best when the camera moves in or out
 STRONG = 1.9  # [video] scenes: this much more zoom and travel
+# --camera bold: bigger, faster eased moves (the clamp in move_props still keeps the picture over the frame)
+BOLD_MOVES = {
+    "zoom-in": ((1.0, 0, 0), (1.2, 0, 0)),
+    "zoom-out": ((1.2, 0, 0), (1.02, 0, 0)),
+    "pan-left": ((1.16, 7, 0), (1.16, -7, 0)),
+    "pan-right": ((1.16, -7, 0), (1.16, 7, 0)),
+    "tilt-up": ((1.16, 0, -6), (1.16, 0, 6)),
+    "tilt-down": ((1.16, 0, 6), (1.16, 0, -6)),
+    "push-left": ((1.02, 3, 0), (1.24, -4, 0)),
+    "push-right": ((1.02, -3, 0), (1.24, 4, 0)),
+    "push-up": ((1.02, 0, 3), (1.22, 0, -3)),
+    "drift": ((1.12, -5, 4), (1.2, 5, -3)),
+}
+BOLD_PARALLAX = ("zoom-in", "push-left", "push-right", "push-up", "zoom-out")
+CAMERA = {"calm": (MOVES, PARALLAX_MOVES, STRONG), "bold": (BOLD_MOVES, BOLD_PARALLAX, 1.35)}
+EASE = {"calm": [0.45, 0.05, 0.55, 0.95], "bold": [0.3, 0.0, 0.15, 1.0]}  # cubic-bezier: bold gets going fast, then settles
+CHAPTER_TRANSITIONS = ("whip", "zoom")  # --camera bold, alternating at each new chapter; crossfades everywhere else
+# --depth: how far the near layer grows and drifts (% of the frame) and the backdrop drifts the other way
+DEPTH = {"strong": {"scale": 0.11, "shift": 3.2, "back": 1.0}, "subtle": {"scale": 0.045, "shift": 1.2, "back": 0.0},
+         "off": None}
 
 
 def node_bin():
@@ -121,10 +141,44 @@ def plan_moves(scenes, seed, has_mask=()):
     return names
 
 
-def move_props(name, strong, img_aspect, frame_w, frame_h):
+def plan_shot_moves(counts, seed, masked=(), camera="calm"):
+    """Moves per shot ([[name, ...] per scene], counts = shots per scene): varied, never the same twice in a row
+    (also between a scene's two shots), pushes for pictures with parallax. masked: {(scene, shot)}."""
+    moves, parallax, _ = CAMERA[camera]
+    rng = random.Random(seed)
+    flat, out = [], []
+    for i, n in enumerate(counts):
+        names = []
+        for j in range(n):
+            pool = [m for m in (parallax if (i, j) in masked else moves) if not flat or m != flat[-1]]
+            if len(flat) >= 2 and len(pool) > 1:
+                pool = [m for m in pool if m != flat[-2]] or pool
+            flat.append(rng.choice(pool))
+            names.append(flat[-1])
+        out.append(names)
+    return out
+
+
+def plan_transitions(sections, camera="calm"):
+    """The transition into each scene: a whip-pan or zoom (alternating) where a new chapter starts with --camera bold,
+    a crossfade everywhere else."""
+    from youtube_meta import section_key
+    out, k = [], 0
+    for i, s in enumerate(sections):
+        new = i > 0 and s and section_key(s) != section_key(sections[i - 1] or "")
+        if camera == "bold" and new:
+            out.append(CHAPTER_TRANSITIONS[k % len(CHAPTER_TRANSITIONS)])
+            k += 1
+        else:
+            out.append("fade")
+    return out
+
+
+def move_props(name, strong, img_aspect, frame_w, frame_h, camera="calm"):
     """The move's start and end, stronger for [video] scenes, with offsets clamped to what the picture can cover."""
-    a, b = MOVES[name]
-    k = STRONG if strong else 1.0
+    moves, _, strong_k = CAMERA[camera]
+    a, b = moves[name]
+    k = strong_k if strong else 1.0
 
     def point(p):
         scale = 1 + (p[0] - 1) * k
@@ -267,29 +321,45 @@ def prepare_assets(scenes, public, args, fmt, state, lengths=None):
         if not src:
             assets.append({"kind": "card"})
             continue
-        if src not in copied:
-            dest = public / f"scene_{i:03}_{fmt}{Path(src).suffix.lower()}"
-            shutil.copy(src, dest)
-            copied[src] = {"file": dest.name, "image": src}
-        entry = copied[src]
-        with Image.open(public / entry["file"]) as img:
-            asset = {"kind": "image", "src": entry["file"], "width": img.width, "height": img.height}
-        if "mask" not in entry and not args.no_parallax and state.get("parallax", True):
-            import depth
-            try:
-                mask = depth.foreground_mask(entry["image"])
-            except Exception as e:  # no model download, odd image: plain motion is fine
-                print(f"  parallax skipped for scene {i + 1} ({e.__class__.__name__}: {e})")
-                state["parallax"] = False
-                mask = None
-            entry["mask"] = None
-            if mask:
-                entry["mask"] = Path(entry["file"]).stem + "_fg.png"
-                shutil.copy(mask, public / entry["mask"])
-        if entry.get("mask"):
-            asset["mask"] = entry["mask"]
-        assets.append(asset)
+        shots = [image_asset(src, public, f"scene_{i:03}_{fmt}", args, state, copied, i)]
+        if (src2 := mv.scene_src2(s, fmt)) and Path(src2).suffix.lower() in mv.IMAGE_EXT:
+            shots.append(image_asset(src2, public, f"scene_{i:03}_{fmt}_2", args, state, copied, i))
+        assets.append({"kind": "image", **shots[0], "shots": shots})
     return assets
+
+
+def image_asset(src, public, stem, args, state, copied, i):
+    """One picture in the public dir: its size, and with --depth its foreground mask (and with strong depth the
+    filled-in background plate). Files used twice (both formats, both shots) are copied once."""
+    from PIL import Image
+    if src not in copied:
+        dest = public / f"{stem}{Path(src).suffix.lower()}"
+        shutil.copy(src, dest)
+        copied[src] = {"file": dest.name, "image": src}
+    entry = copied[src]
+    with Image.open(public / entry["file"]) as img:
+        asset = {"src": entry["file"], "width": img.width, "height": img.height}
+    mode = "off" if getattr(args, "no_parallax", False) else getattr(args, "depth", "strong")
+    if "mask" not in entry and mode != "off" and state.get("parallax", True):
+        import depth
+        entry["mask"] = entry["plate"] = None
+        try:
+            mask = depth.foreground_mask(entry["image"])
+            plate = depth.background_plate(entry["image"], mask) if mask and mode == "strong" else None
+        except Exception as e:  # no model download, odd image: plain motion is fine
+            print(f"  parallax skipped for scene {i + 1} ({e.__class__.__name__}: {e})")
+            state["parallax"] = False
+            mask = plate = None
+        if mask:
+            entry["mask"] = Path(entry["file"]).stem + "_fg.png"
+            shutil.copy(mask, public / entry["mask"])
+        if plate:
+            entry["plate"] = Path(entry["file"]).stem + "_bg.jpg"
+            shutil.copy(plate, public / entry["plate"])
+    for key in ("mask", "plate"):
+        if entry.get(key):
+            asset[key] = entry[key]
+    return asset
 
 
 # ---------- estimate ----------
@@ -326,16 +396,36 @@ def concurrency():
     return max(1, (os.cpu_count() or 4) // 2)
 
 
-def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, places_, args, fps=mv.FPS, part=None):
+def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, places_, args, fps=mv.FPS, part=None,
+                transitions=None):
     """Props for one video. part = (k, n) for part k of n of the vertical series: "Part k of N" in the intro, and
-    "Watch Part k+1" instead of the subscribe card in every outro but the last."""
+    "Watch Part k+1" instead of the subscribe card in every outro but the last. moves: a name, or a list of names
+    (one per shot), per scene."""
+    import overlays
     w, h = mv.FORMATS[fmt]["size"]
+    camera = getattr(args, "camera", "calm")
+    depth = DEPTH["off" if getattr(args, "no_parallax", False) else getattr(args, "depth", "subtle")]
     props_scenes = []
-    for s, a, name, length in zip(scenes, assets, moves, lengths):
-        aspect = (a.get("width") or 1) / (a.get("height") or 1)
+    for n, (s, a, names, length) in enumerate(zip(scenes, assets, moves, lengths)):
+        names = [names] if isinstance(names, str) else list(names)
         strong = bool(s.get("video")) and a["kind"] == "image"
-        props_scenes.append({**a, "frames": length, "text": s["text"] if a["kind"] == "card" else None,
-                             "move": move_props(name, strong, aspect, w, h)})
+        shots = a.get("shots") or [a]
+        if a["kind"] != "image":
+            shots = [a]
+        cut = round(length / 2)  # a scene with two shots cuts to the second half way through
+        shot_props = []
+        for j, shot in enumerate(shots):
+            aspect = (shot.get("width") or 1) / (shot.get("height") or 1)
+            name = names[min(j, len(names) - 1)]
+            shot_props.append({**{k: v for k, v in shot.items() if k != "shots"}, "from": 0 if j == 0 else cut,
+                               "move": move_props(name, strong, aspect, w, h, camera)})
+        props = {**{k: v for k, v in a.items() if k != "shots"}, "frames": length,
+                 "text": s["text"] if a["kind"] == "card" else None, "move": shot_props[0]["move"],
+                 "ease": EASE[camera], "transition": (transitions or [])[n] if transitions else "fade", "seed": n + 1}
+        if a["kind"] == "image":
+            props.update(shots=shot_props, parallax=depth,
+                         overlays=overlays.choose(s) if getattr(args, "overlays", False) else [])
+        props_scenes.append(props)
     return {"width": w, "height": h, "fps": fps, "durationInFrames": total, "transitionFrames": TRANSITION,
             "introFrames": 0 if args.no_branding else INTRO, "outroFrames": 0 if args.no_branding else OUTRO,
             "font": "font.ttf", "channel": args.channel, "tagline": TAGLINE, "scenes": props_scenes,
@@ -414,10 +504,19 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
     shutil.copy(font_path, public / "font.ttf")
     print("Preparing Remotion assets...")
     state, assets, moves = {}, {}, {}
+    camera = getattr(args, "camera", "calm")
     for fmt in formats:
         assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
-        moves[fmt] = plan_moves(scenes, script.stem, {i for i, a in enumerate(assets[fmt]) if a.get("mask")})
-    parallax = " / ".join(f"{sum(bool(a.get('mask')) for a in assets[f])} {f}" for f in formats)
+        counts = [len(a.get("shots") or [a]) for a in assets[fmt]]
+        masked = {(i, j) for i, a in enumerate(assets[fmt]) for j, sh in enumerate(a.get("shots") or [a]) if sh.get("mask")}
+        moves[fmt] = plan_shot_moves(counts, script.stem, masked, camera)
+    sections = [s.get("section") for s in scenes] if scenes and "section" in scenes[0] else mv.parse_sections(script)
+    sections = sections if len(sections) == len(scenes) else [None] * len(scenes)
+    parallax = " / ".join(f"{sum(bool(sh.get('mask')) for a in assets[f] for sh in a.get('shots') or [a])} {f}"
+                          for f in formats)
+    two = sum(len(a.get("shots") or []) > 1 for a in assets[formats[0]])
+    if two:
+        print(f"  {two} scene(s) cut between two shots")
     cuts = plan_cuts(scenes, formats, out, parts)
     frames = {c: timeline(durations[c[1]:c[2]], fps, intro, outro)[3] for c in cuts}
     n_parts = sum(c[3] is not None for c in cuts)
@@ -433,7 +532,7 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
     npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={bundle}", "--log=error", capture=True)
 
     starts = [sum(durations[:i]) for i in range(len(scenes) + 1)]  # where each scene starts in the narration
-    outs = []
+    outs, wrote_sfx = [], False
     for cut in cuts:
         fmt, a, b, part, video = cut
         name = f"{fmt}_part{part[0]}" if part else fmt
@@ -447,8 +546,19 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
         audio = timeline_audio(voice, c_lead / fps, c_total / fps, rwork, f"timeline_{name}.wav")
         props = rwork / f"props_{name}.json"
         props.write_text(json.dumps(build_props(fmt, sub, assets[fmt][a:b], moves[fmt][a:b], c_lengths, c_bounds,
-                                                c_total, lines, places_, args, part=part),
+                                                c_total, lines, places_, args, part=part,
+                                                transitions=plan_transitions(sections[a:b], camera)),
                                     ensure_ascii=False), encoding="utf-8")
+        ambience = None
+        if getattr(args, "sound_effects", False):
+            import sfx
+            cats = [sfx.choose(s) for s in sub]
+            ends = list(c_bounds[1:]) + [c_bounds[-1] + c_lengths[-1] - TRANSITION]
+            ambience = sfx.ambience_track(sfx.beds(cats, [(x / fps, y / fps) for x, y in zip(c_bounds, ends)]),
+                                          c_total / fps, rwork / f"ambience_{name}.wav", args.sfx_volume)
+            if (a, b) == (0, len(scenes)) and not wrote_sfx:
+                sfx.record(sub, cats, out.sound_effects)
+                wrote_sfx = True
         silent = rwork / f"{name}_silent.mp4"
         w, h = mv.FORMATS[fmt]["size"]
         label = f"{fmt} part {part[0]} of {part[1]} (scenes {a + 1}-{b})" if part else fmt
@@ -458,7 +568,7 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
             "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
         save_speed(fmt, (time.time() - t0) / c_total)
         print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
-        outs.append(mv.mux(silent, audio, args, video, cwd=rwork, video_codec=["-c:v", "copy"]))
+        outs.append(mv.mux(silent, audio, args, video, cwd=rwork, video_codec=["-c:v", "copy"], ambience=ambience))
     return outs, lead / fps, total / fps
 
 

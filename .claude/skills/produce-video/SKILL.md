@@ -199,6 +199,15 @@ beyond them.)
 - Image scenes: eased pans, tilts, zooms and pushes, never the same move twice in a row, clamped so edges never show; `[video]`
   scenes move more. Each format uses its own 16:9 or 9:16 image. Subtle 2.5D parallax only where the depth model finds a clear
   subject in front of a backdrop (`--no-parallax` turns it off). Crossfades are centred on narration boundaries.
+- **Stills that feel alive** (defaults, each a toml key): `depth = "strong"` (parallax over an inpainted background plate,
+  `depth.background_plate`), `overlays = true` (`overlays.py` picks up to two of dust/smoke/mist/rain/heat/fire/leaves/
+  ripple/rays from the Visuals line and prompt; `remotion/src/Overlays.tsx` draws them), `camera = "bold"` (bigger eased moves,
+  whip/zoom transitions at chapter starts), `sound-effects = true` (`sfx.py`: CC0 loops in `assets/sfx/`, sources in
+  `sources.json`, ducked under the voice; per-render record in `Working/sound_effects.json`; only ever add CC0 sounds, with
+  the licence checked and recorded), `two-shots = true` (scenes over 6 s get `prompt2` and a second image, cut half way;
+  about doubles the image neurons, so mention `--no-two-shots` when the allowance is tight).
+- `--preview-scenes "1,6,8"` renders just those scenes in one format to `Working/preview.mp4`; use it to show the user a
+  change before a full render.
 - Captions by `--caption-style` (toml `caption-style`): `auto` = `bold` vertical (2-4 big words a line, popping in as spoken)
   and `clean` horizontal (calm lines, spoken word yellow); `minimal` is a small plain line. Key words (numbers, places, names,
   "called X" hack names) are coloured and slightly bigger. Lines move off faces found by YuNet (`models/`, cached per image);

@@ -141,10 +141,15 @@ def analyse(script, args):
             chars = (len(ai_visuals.PROMPT_SYSTEM) + len(s["text"]) + len(s["description"]) + len(args.style)
                      + sheet_chars + PREVIOUS_PROMPT_CHARS)
             est["neurons_prompts"] += text_neurons(args.text_model, chars, PROMPT_OUT_TOKENS)
+    two = second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cache_ids, cloudflare_images)
+    est.update(two)
     if args.check_images:  # one check per new image; failures cost a redraw and a check each, not counted here
         est["checks"] += est["images_new"]
         est["neurons_checks"] = est["checks"] * check_neurons(args.vision_model)
-    est["neurons_total"] = est["neurons_prompts"] + est["neurons_images"] + est["neurons_checks"]
+    if args.check_images:
+        est["neurons_checks"] += est["second_images_new"] * check_neurons(args.vision_model)
+    est["neurons_total"] = (est["neurons_prompts"] + est["neurons_images"] + est["neurons_checks"]
+                            + est["neurons_second"])
     if args.upscale:  # new images are always under 2048 px, so each one goes to Kaggle once
         est["upscale_todo"] += est["images_new"]
     import shorts
@@ -162,6 +167,36 @@ def analyse(script, args):
             "prompts_path": prompts_path, "stock": stock_plan(scenes, args, out),
             "video_seconds": shorts.part_seconds(seconds, branding) if rows else 0.0, "parts": parts,
             "part_lines": shorts.describe(parts, seconds, sections, branding) if len(parts) > 1 else []}
+
+
+SECOND_PROMPT_CHARS, SECOND_OUT_TOKENS = 1200, 110  # the second-shot rewrite: the first prompt in, a new one out
+
+
+def second_shot_estimate(scenes, saved, sheet, args, sizes, model, model_id, cache_ids, cloudflare_images):
+    """--two-shots: scenes over 6 s get a second image; its prompt and images count unless already saved and cached.
+    Stock scenes won't need one, so this is the most it can cost."""
+    two = mv.two_shot_scenes(scenes, args)
+    out = {"second_scenes": 0, "second_prompts_new": 0, "second_images_new": 0, "neurons_second": 0.0}
+    for i in sorted(two):
+        s = scenes[i]
+        if s["visual"]:
+            continue
+        out["second_scenes"] += 1
+        rec = saved.get(s["text"]) or {}
+        prompt = ai_visuals.saved_prompt(saved, s)
+        prompt2 = rec.get("prompt2") if prompt and rec.get("prompt2_for") == prompt else None
+        if not prompt2:
+            out["second_prompts_new"] += 1
+            out["neurons_second"] += text_neurons(args.text_model, len(ai_visuals.SECOND_SYSTEM) + SECOND_PROMPT_CHARS,
+                                                  SECOND_OUT_TOKENS)
+        for z in sizes:
+            shot = ai_visuals.enforce_characters(prompt2, s["text"], sheet, s["description"]) if prompt2 else None
+            full = ai_visuals.full_prompt(shot, args.style, z) if shot else None
+            if full and not args.new_images and any(ai_visuals.image_path(full, m, z).exists() for m in cache_ids):
+                continue
+            out["second_images_new"] += 1
+            out["neurons_second"] += model.neurons(*ai_visuals.dims(z)) if cloudflare_images else 0
+    return out
 
 
 def video_range(n):
@@ -288,6 +323,10 @@ def report(script, args):
     if args.check_images:
         print(f"  quality checks: {est['checks']} (~{est['neurons_checks']:.0f} neurons; each failed image adds a redraw "
               f"and a check, up to {ai_visuals.QC_RETRIES} times)")
+    if est["second_scenes"]:
+        print(f"  second shots:  {est['second_scenes']} scene(s) over {mv.TWO_SHOT_SECONDS:.0f} s, "
+              f"{est['second_prompts_new']} new prompt(s) and {est['second_images_new']} new image(s) "
+              f"(~{est['neurons_second']:.0f} neurons, plus their checks; fewer if stock is used; --no-two-shots)")
     if est["neurons_meta"]:
         shorts_note = f", incl. {len(a['parts'])} Shorts" if len(a["parts"]) > 1 else ""
         print(f"  YouTube notes:  ~{est['neurons_meta']:.0f} neurons{shorts_note}")

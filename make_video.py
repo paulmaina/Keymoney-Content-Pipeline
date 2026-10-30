@@ -371,6 +371,11 @@ def scene_src(s, fmt):
     return (s.get("srcs") or {}).get(fmt) or s.get("src")
 
 
+def scene_src2(s, fmt):
+    """The scene's second shot for one format (--two-shots), or None."""
+    return (s.get("srcs2") or {}).get(fmt) or s.get("src2")
+
+
 # ---------- captions ----------
 
 class Word(NamedTuple):
@@ -559,13 +564,34 @@ def write_part_srts(chunks, scenes, parts, out, renderer, lead_in):
     return outs
 
 
-def mux(video, narration, args, out, cwd, filters=(), video_codec=None):
-    """Video + narration (+ ducked, faded music) -> out. Both renderers finish here, so they sound the same."""
+def background_filter(dur, music_volume=None, ambience_input=None, fade=MUSIC_FADE):
+    """Filter graph for the narration (input 1) with music (input 2, looped) and/or an ambience track (already placed
+    on the timeline) mixed under it -> [a]. Both beds are ducked whenever the voice speaks; the music fades out."""
+    beds = []
+    if music_volume is not None:
+        beds.append(f"[2:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},volume={music_volume},"
+                    f"afade=t=out:st={max(dur - fade, 0):.3f}:d={fade}[m]")
+    if ambience_input is not None:
+        beds.append(f"[{ambience_input}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{dur:.3f}[s]")
+    labels = ("[m]" if music_volume is not None else "") + ("[s]" if ambience_input is not None else "")
+    mix = f"{labels}amix=inputs=2:duration=first:normalize=0[bg]" if len(beds) == 2 else f"{labels}anull[bg]"
+    return (";".join(beds) + f";{mix};[1:a]asplit=2[vo][key];"
+            f"[bg][key]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=400[duck];"
+            f"[vo][duck]amix=inputs=2:duration=first:normalize=0[a]")
+
+
+def mux(video, narration, args, out, cwd, filters=(), video_codec=None, ambience=None):
+    """Video + narration (+ ducked, faded music, + the ducked ambience track) -> out. Both renderers finish here, so
+    they sound the same."""
     inputs = ["-i", str(video), "-i", str(narration)]
     if args.music:
         inputs += ["-stream_loop", "-1", "-i", str(args.music)]
-        audio = ["-filter_complex", music_filter(duration(narration), args.music_volume),
-                 "-map", "0:v", "-map", "[a]"]
+    if ambience:
+        inputs += ["-i", str(ambience)]
+    if args.music or ambience:
+        graph = background_filter(duration(narration), args.music_volume if args.music else None,
+                                  (3 if args.music else 2) if ambience else None)
+        audio = ["-filter_complex", graph, "-map", "0:v", "-map", "[a]"]
     else:
         audio = ["-map", "0:v", "-map", "1:a"]
     codec = video_codec or ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
@@ -642,6 +668,10 @@ def parse_args(argv=None):
     ap.add_argument("--text-model", default=ai_visuals.TEXT_MODEL,
                     help="Workers AI model that writes the image prompts (~50 neurons a scene)")
     ap.add_argument("--style", default="", help='appended to every image prompt, e.g. "cinematic, warm tones"')
+    ap.add_argument("--preview-scenes", default="", metavar='"1,6,8"',
+                    help="render only these scenes (with their voice, captions and visuals) in one format, the "
+                         "horizontal one unless --format vertical, to Exports/<name>/Working/preview.mp4, to compare "
+                         "quickly; makes any missing images for those scenes only")
     ap.add_argument("--visuals-only", action="store_true",
                     help="make and cache the prompts and images (with their checks, stock and --upscale), then stop "
                          "before the voice and video: for scripts that need several days of Cloudflare allowance")
@@ -671,8 +701,25 @@ def parse_args(argv=None):
                          "a world map and a branded intro/outro (needs Node.js; slower); ffmpeg = simple zooms, fast. "
                          "Falls back to ffmpeg when Node.js is missing")
     ap.add_argument("--no-branding", action="store_true", help="remotion: leave out the channel intro and outro")
-    ap.add_argument("--no-parallax", action="store_true",
-                    help="remotion: plain pans and zooms only (skips the depth model, ~1 s per image)")
+    ap.add_argument("--depth", choices=["strong", "subtle", "off"], default="strong",
+                    help="remotion 2.5D parallax on pictures with a clear foreground: strong (default: more separation, "
+                         "a camera move through the scene, the background behind the subject filled in so no edge "
+                         "stretches), subtle, or off")
+    ap.add_argument("--no-parallax", action="store_true", help="the same as --depth off")
+    ap.add_argument("--overlays", action=on_off, default=True,
+                    help="remotion: subtle animated dust, smoke, mist, rain, heat shimmer, firelight, leaves, water "
+                         "ripples or light rays on each picture, chosen from its Visuals line and prompt (drawn in "
+                         "code: no downloads or neurons)")
+    ap.add_argument("--camera", choices=["bold", "calm"], default="bold",
+                    help="remotion camera: bold (default: faster eased pushes, pans and tilts, whip-pan or zoom "
+                         "transitions between chapters) or calm (slow moves, crossfades only)")
+    ap.add_argument("--sound-effects", action=on_off, default=True,
+                    help="remotion: quiet CC0 ambience (wind, water, birds, fire, market, rain) under each scene, "
+                         "ducked under the voice")
+    ap.add_argument("--sfx-volume", type=float, default=0.5, help="level of the ambience before ducking (default 0.5)")
+    ap.add_argument("--two-shots", action=on_off, default=True,
+                    help="scenes longer than 6 s get a second AI image of the same moment from another angle or "
+                         "distance, and cut between them (about 200 more neurons each; --check shows them)")
     ap.add_argument("--caption-style", choices=["auto", "bold", "clean", "minimal"], default="auto",
                     help="remotion captions: bold = big words popping in 2-4 at a time; clean = one or two calm lines "
                          "with the spoken word highlighted; minimal = a small plain line. auto (default) = bold for "
@@ -696,6 +743,9 @@ def parse_args(argv=None):
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
     args.redo = parse_scene_numbers(args.redo_scenes, ap)
+    args.preview = parse_scene_numbers(args.preview_scenes, ap)
+    if args.no_parallax:
+        args.depth = "off"
     args.generate_visuals |= args.prompts_only or args.visuals_only or bool(args.redo) or args.media == "stock"
     return args
 
@@ -705,7 +755,7 @@ def parse_scene_numbers(text, ap=None):
     try:
         return {int(n) - 1 for n in re.split(r"[,\s]+", text.strip()) if n} if text.strip() else set()
     except ValueError:
-        (ap.error if ap else sys.exit)(f'--redo-scenes expects scene numbers like "3,7", got "{text}"')
+        (ap.error if ap else sys.exit)(f'expected scene numbers like "3,7", got "{text}"')
 
 
 def main():
@@ -743,9 +793,40 @@ def main():
         produce(args, script, scenes, font_path, out)
 
 
+TWO_SHOT_SECONDS = 6.0  # scenes whose narration runs longer get a second shot (--two-shots)
+
+
+def two_shot_scenes(scenes, args):
+    """0-based scenes long enough for a second shot, from the estimated narration length (images come before audio)."""
+    if not getattr(args, "two_shots", False):
+        return set()
+    import script_check
+    return {i for i, sec in enumerate(script_check.estimated_seconds(scenes, args)) if sec > TWO_SHOT_SECONDS}
+
+
+def annotate(scenes, script):
+    """Each scene's chapter heading (s["section"]) and '# location:' override (s["location"]: a Place, False for 'none',
+    or None) from the script, so they stay with the scene when only some scenes are rendered (--preview-scenes)."""
+    import places
+    sections, forced = parse_sections(script), places.overrides(script)
+    for i, s in enumerate(scenes):
+        s["number"] = i + 1  # as --check and the log number it, also when only some scenes are rendered
+        s["section"] = sections[i] if len(sections) == len(scenes) else None
+        s["location"] = forced[i] if len(forced) == len(scenes) else None
+
+
 def produce(args, script, scenes, font_path, out):
-    """Visuals, voice, captions, the videos and the YouTube notes, into the video's folder (`out`: outputs.Outputs)."""
+    """Visuals, voice, captions, the videos and the YouTube notes, into the video's folder (`out`: outputs.Outputs).
+    With --preview-scenes, only those scenes, in one format, to Working/preview.mp4."""
     formats = list(FORMATS) if args.format == "both" else [args.format]
+    annotate(scenes, script)
+    preview = sorted(args.preview)
+    if preview:
+        if (bad := [n + 1 for n in preview if not 0 <= n < len(scenes)]):
+            sys.exit(f"--preview-scenes: there is no scene {', '.join(map(str, bad))} (the script has {len(scenes)})")
+        formats = ["vertical"] if args.format == "vertical" else ["horizontal"]
+        print(f"Preview of scene(s) {', '.join(str(n + 1) for n in preview)} ({formats[0]})")
+    picked = [scenes[i] for i in preview] if preview else scenes
     failed_visuals = []
     if args.generate_visuals:
         if (bad := sorted(n + 1 for n in args.redo if not 0 <= n < len(scenes))):
@@ -758,23 +839,25 @@ def produce(args, script, scenes, font_path, out):
         if not args.prompts_only:
             import script_check
             import stock
-            plan = stock.fill_stock(scenes, formats, args.media, args.stock, providers,
-                                    script_check.estimated_seconds(scenes, args), parse_characters(script))
+            plan = stock.fill_stock(picked, formats, args.media, args.stock, providers,
+                                    script_check.estimated_seconds(picked, args), parse_characters(script))
         failed_visuals = ai_visuals.generate_scene_visuals(
             scenes, out.prompts, style=args.style, regenerate=args.regenerate,
             prompts_only=args.prompts_only, provider=args.image_provider, providers=providers,
-            characters=parse_characters(script), formats=formats, redo=args.redo, check=args.check_images)
+            characters=parse_characters(script), formats=formats, redo=args.redo, check=args.check_images,
+            only=set(preview) or None, second_shots=two_shot_scenes(scenes, args))
         if args.prompts_only:
             print("Prompts only: review and edit the file above, then rerun with --generate-visuals.")
             return
-        stock.write_media_json(scenes, plan, out.media)
-        if args.check_images:
-            ai_visuals.write_check_report(scenes, out.checks)
+        if not preview:  # a preview covers a few scenes; the full run's records stay as they are
+            stock.write_media_json(scenes, plan, out.media)
+            if args.check_images:
+                ai_visuals.write_check_report(scenes, out.checks)
     elif args.regenerate:
         print("Note: --regenerate only applies with --generate-visuals.")
     if args.upscale:
         import upscale
-        upscale.upscale_scenes(scenes, formats, work=out.kaggle("upscale"))
+        upscale.upscale_scenes(picked, formats, work=out.kaggle("upscale"))
     if args.visuals_only:
         missing = f" Still missing: scene(s) {', '.join(map(str, failed_visuals))}." if failed_visuals else ""
         print(f"Visuals only: prompts and images are saved and cached; no voice or video was made.{missing} "
@@ -782,6 +865,8 @@ def produce(args, script, scenes, font_path, out):
         return
     if args.engine == "kokoro":  # voice prerequisites only now: --visuals-only and --prompts-only never need them
         check_kokoro_model()
+    if preview:
+        return render_preview(args, script, picked, font_path, out, formats[0])
     work = out.render
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -840,6 +925,32 @@ def produce(args, script, scenes, font_path, out):
     if failed_visuals:
         print(f"Image generation failed for scene(s) {', '.join(map(str, failed_visuals))}; "
               "they use title cards. Rerun later to retry (successful images are cached).")
+
+
+def render_preview(args, script, scenes, font_path, out, fmt):
+    """--preview-scenes: voice, captions and one format for the picked scenes only, to Working/preview.mp4. No Shorts,
+    caption file or YouTube notes, and the full run's prompts, media and check records are left as they were."""
+    import outputs
+    work = out.working / "preview_render"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    args.kaggle_work = out.kaggle("chatterbox")
+    print(f"{len(scenes)} scene(s). Generating voice over ({args.engine})...")
+    narration = narrate(scenes, work, args)
+    srt, chunks = None, None
+    if not args.no_captions:
+        srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
+                                    args.whisper_model, args.caption_words)
+    target = outputs.PreviewOutputs(out.folder, out.name)
+    if args.renderer == "remotion":
+        import remotion_render
+        remotion_render.render_all(scenes, work, narration, chunks, font_path, args, [fmt], target, script, [])
+    else:
+        render_format(fmt, scenes, work, narration, srt, font_path, args, target.video(fmt))
+    if not args.keep_work:
+        shutil.rmtree(work, ignore_errors=True)
+    print(f"Preview: {target.video(fmt)} ({duration(target.video(fmt)):.1f}s)")
+    return target.video(fmt)
 
 
 if __name__ == "__main__":
