@@ -154,3 +154,38 @@ def test_remotion_reuses_prepared_pictures_the_bundle_and_finished_renders(tmp_p
     with pytest.raises(SystemExit):
         render()
     assert (prepared, npx_calls) == ([], ["render"])  # only the vertical video, which failed, is rendered again
+
+
+def test_changing_the_channel_s_branding_after_a_failed_run_starts_the_render_over(pipeline):
+    import channels
+    profile = channels.CHANNELS_DIR / "smart_village_boy.toml"
+    profile.write_text('name = "Smart Village Boy"\ntagline = "Clever ideas"\n', encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        pipeline.run()
+    pipeline.calls.clear()
+    profile.write_text('name = "Smart Village Boy"\ntagline = "Smart ideas from everywhere"\n', encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        pipeline.run()
+    assert pipeline.calls == ["voice", "captions", "horizontal", "vertical"]  # nothing from the old render reused
+
+
+def test_the_key_follows_the_channel_s_colours_clips_and_settings(tmp_path, monkeypatch):
+    import channels
+    script = tmp_path / "s.txt"
+    script.write_text("Hello.\n", encoding="utf-8")
+    profile = channels.CHANNELS_DIR / "smart_village_boy.toml"
+
+    def key(text):
+        profile.write_text(text, encoding="utf-8")
+        return checkpoints.render_key(script, [{"text": "Hello."}], mv.parse_args([str(script)]))
+    base = key('name = "Smart Village Boy"\n')
+    assert key('name = "Smart Village Boy"\n[colors]\naccent = "#000000"\n') != base
+    assert key('name = "Smart Village Boy"\ncaption-style = "bold"\n') != base
+    assert key('name = "Smart Village Boy"\n') == base
+    branding = channels.CHANNELS_DIR / "smart_village_boy" / "branding"
+    branding.mkdir(parents=True)
+    (branding / "intro_horizontal.mp4").write_bytes(b"clip one")
+    with_clip = key('name = "Smart Village Boy"\n')
+    assert with_clip != base
+    (branding / "intro_horizontal.mp4").write_bytes(b"clip two")  # same size, new contents
+    assert key('name = "Smart Village Boy"\n') != with_clip

@@ -916,26 +916,47 @@ def assign_ids(scenes):
     return scenes
 
 
-def migrate_records(records):
-    """Give prompt records saved before ids existed (keyed by narration) their id, numbering repeated narration in
-    scene order. Every other field, including the user's edited prompts, is kept as it is."""
-    seen = {}
-    for r in sorted((r for r in records if isinstance(r, dict)), key=lambda r: r.get("scene") or 0):
-        text = r.get("narration")
-        if isinstance(text, str):
-            seen[text] = seen.get(text, 0) + 1
-            r.setdefault("id", scene_id(text, seen[text]))
-    return records
+def migrate_records(records, scenes):
+    """Match prompt records saved before ids existed to the script's scenes (the full list, with ids from assign_ids)
+    and give each its scene's id. A record matches the scene with its stored scene number when that scene has the same
+    narration; failing that, the one scene not yet matched with the same narration and visual description. Anything
+    else can't be matched with confidence and is returned in `unmatched`, never dropped. Every other field, including
+    the user's edited prompts, is kept as it is. Returns (records with ids, unmatched records)."""
+    records = [r for r in records if isinstance(r, dict)]
+    old = [r for r in records if not r.get("id")]
+    taken = {r["id"] for r in records if r.get("id")}
+    pending = []
+    for r in old:  # first by stored scene number and narration
+        n = r.get("scene")
+        s = scenes[n - 1] if isinstance(n, int) and 1 <= n <= len(scenes) else None
+        if s and s["text"] == r.get("narration") and s["id"] not in taken:
+            r["id"] = s["id"]
+            taken.add(s["id"])
+        else:
+            pending.append(r)
+    unmatched = []
+    for r in pending:  # then by narration and visual description, when exactly one scene fits
+        fits = [s for s in scenes if s["id"] not in taken and s["text"] == r.get("narration")
+                and s.get("description", "") == r.get("description", "")]
+        if len(fits) == 1:
+            r["id"] = fits[0]["id"]
+            taken.add(r["id"])
+        else:
+            unmatched.append(r)
+    return [r for r in records if r.get("id")], unmatched
 
 
-def load_prompt_records(path):
+def load_prompt_records(path, scenes=None):
     """Saved prompt records keyed by scene id (see scene_id), so edits survive reordering the script and repeated
-    narration keeps one record per scene. Files from before ids are migrated as they're read."""
+    narration keeps one record per scene. Records from before ids are matched to `scenes` (the script's full scene
+    list) as they're read; without scenes, only records that already have an id count."""
     try:
-        return {s["id"]: s for s in migrate_records(list(load_prompt_file(path)["scenes"]))
-                if isinstance(s, dict) and s.get("prompt") and s.get("id")}
+        records = list(load_prompt_file(path)["scenes"])
     except (KeyError, TypeError, AttributeError):
         return {}
+    if scenes is not None:
+        records, _ = migrate_records(records, assign_ids(scenes))
+    return {s["id"]: s for s in records if isinstance(s, dict) and s.get("prompt") and s.get("id")}
 
 
 def load_prompts(path):
@@ -1059,12 +1080,18 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
         print(f"  the style changed since {prompts_path.name} was written: writing new prompts and character "
               "descriptions for it (your '# character:' lines are kept)")
     assign_ids(scenes)
-    saved = {} if fresh else load_prompt_records(prompts_path)
+    file = {} if fresh else load_prompt_file(prompts_path)
+    matched, unmatched = migrate_records(list(file.get("scenes") or []), scenes)
+    unmatched = [r for r in file.get("unmatched") or [] if isinstance(r, dict)] + unmatched
+    if len(unmatched) > len(file.get("unmatched") or []):
+        print(f"  WARNING: {len(unmatched) - len(file.get('unmatched') or [])} saved prompt(s) in {prompts_path.name} "
+              "from before scene ids couldn't be matched to a scene with confidence; they're kept under \"unmatched\" "
+              "in the file (copy any edit you want back into its scene's prompt)")
+    saved = {r["id"]: r for r in matched if r.get("prompt")}
     # scenes of this script not drawn this run (stock, own files, outside a preview) keep their saved records;
     # records for scenes the script no longer has are dropped
     others = {s["id"] for s in scenes} - {s["id"] for _, s in targets}
-    kept = [] if fresh else [r for r in migrate_records(list(load_prompt_file(prompts_path).get("scenes", [])))
-                             if isinstance(r, dict) and r.get("id") in others]
+    kept = [r for r in matched if r.get("id") in others]
     numbers = {s["id"]: n for n, s in enumerate(scenes, 1)}
     for r in kept:  # a kept record follows its scene when the script is reordered
         r["scene"] = numbers[r["id"]]
@@ -1109,8 +1136,10 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     def save(records):
         prompts_path.parent.mkdir(parents=True, exist_ok=True)
         every = sorted(kept + records, key=lambda r: r.get("scene", 0))
-        prompts_path.write_text(json.dumps({"image_model": providers.image_model, "style": style, "characters": sheet,
-                                            "scenes": every}, indent=2, ensure_ascii=False), encoding="utf-8")
+        data = {"image_model": providers.image_model, "style": style, "characters": sheet, "scenes": every}
+        if unmatched:
+            data["unmatched"] = unmatched
+        prompts_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     save(records)
     print(f"  prompts saved to {prompts_path} (edit them and rerun to change the images)")

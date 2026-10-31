@@ -193,8 +193,9 @@ Short example:
    the scenes that need pictures, the voice: the Kokoro model for a Kokoro channel, Remotion's packages) and stops
    with a message saying what to fix. --visuals-only skips the voice and video checks.
    If the render stops part-way (a crash, Ctrl+C, the PC sleeping), run the same command again: it picks up from the
-   last finished stage (voice, captions, prepared pictures, each video), as long as the script, pictures, settings
-   and code are the same. --fresh starts the voice, captions and videos over.
+   last finished stage (voice, captions, prepared pictures, each video), as long as the script, pictures, settings,
+   the channel (its tagline, colours, branding clips, voice, captions, music, ...) and the code are the same. Change any
+   of them and the render starts over; --fresh starts the voice, captions and videos over too.
    At the end, generated files in Upload\ that this render didn't make (an old Short part from a longer version, say)
    are moved to Working\old_outputs\<date_time>\ and listed, so Upload\ holds only this render's files
    (Working\manifest.json lists them). A vertical-only or horizontal-only render leaves the other format's video
@@ -511,6 +512,11 @@ Anything else
 
 'Branding clip ...: the prepared clip has N frames, not the M the timeline needs'
     FFmpeg couldn't make a clip of the right length from that file. Re-export it as MP4 (H.264, 30 fps) and rerun.
+
+"WARNING: N saved prompt(s) in prompts.json ... couldn't be matched to a scene with confidence"
+    Prompts saved before scene ids are matched to scenes by their scene number, narration and # Visuals line. Ones
+    that fit no scene (or more than one) are kept under "unmatched" in Working\prompts.json, never deleted: copy any
+    edit you want into its scene's "prompt" and rerun.
 
 "Resuming the last render" when you wanted a clean start
     Add --fresh. A render resumes only when the script, pictures, settings and code are unchanged.

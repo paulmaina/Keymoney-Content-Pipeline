@@ -734,3 +734,38 @@ def test_repeated_narration_keeps_a_prompt_and_edit_per_scene(api, tmp_path):
     av.assign_ids(reordered)
     records = av.load_prompt_records(prompts)
     assert [av.saved_prompt(records, s) for s in reordered] == ["misty hills", "a well at dawn", "MY EDIT: a river at dusk"]
+
+
+def test_migration_matches_by_scene_number_when_an_earlier_copy_has_its_own_visual(api, tmp_path):
+    prompts = tmp_path / "p.json"
+    # before scene ids: scene 1 used its own picture (no prompt record), scene 2 repeats its line with the user's edit
+    prompts.write_text(json.dumps({"scenes": [
+        {"scene": 2, "narration": "Water is life.", "description": "", "prompt": "MY EDIT: a river at dusk"},
+    ]}), encoding="utf-8")
+    sc = scenes("Water is life.", "Water is life.")
+    sc[0]["visual"] = "own.png"
+    run(sc, prompts)
+    assert api.text_calls() == []  # the edit was found for scene 2, not given to scene 1 (counting copies in the file would)
+    assert api.image_calls()[0]["prompt"].startswith("MY EDIT: a river at dusk")
+    saved = json.loads(prompts.read_text(encoding="utf-8"))
+    assert [(r["scene"], r["id"], r["prompt"]) for r in saved["scenes"]] == [
+        (2, sc[1]["id"], "MY EDIT: a river at dusk")]
+    assert sc[1]["id"] != sc[0]["id"] and "unmatched" not in saved
+
+
+def test_records_that_cant_be_matched_are_kept_with_a_warning(api, tmp_path, capsys):
+    prompts = tmp_path / "p.json"
+    prompts.write_text(json.dumps({"scenes": [
+        {"scene": 5, "narration": "Water is life.", "description": "a well", "prompt": "edited well"},  # 2 copies fit
+        {"scene": 9, "narration": "A line the script no longer has.", "prompt": "edited old line"},
+    ]}), encoding="utf-8")
+    sc = scenes("Water is life.", "Water is life.")
+    for s in sc:
+        s["description"] = "a well"
+    run(sc, prompts)
+    assert "couldn't be matched to a scene with confidence" in capsys.readouterr().out
+    saved = json.loads(prompts.read_text(encoding="utf-8"))
+    assert [r["prompt"] for r in saved["unmatched"]] == ["edited well", "edited old line"]  # never dropped
+    run(sc, prompts)  # a later run keeps them, without warning again
+    assert "with confidence" not in capsys.readouterr().out
+    assert len(json.loads(prompts.read_text(encoding="utf-8"))["unmatched"]) == 2

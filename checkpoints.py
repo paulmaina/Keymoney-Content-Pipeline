@@ -27,6 +27,18 @@ def stat(path):
         return None
 
 
+def digest(path):
+    """A file's identity by its contents: path and SHA-256 (or None when it doesn't exist)."""
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        return [str(path), h.hexdigest()]
+    except (OSError, TypeError):
+        return None
+
+
 def code_version():
     """A hash of the editor's own code: the Python modules and the Remotion project's sources."""
     h = hashlib.sha256()
@@ -43,13 +55,25 @@ def settings(args):
     for k, v in sorted(vars(args).items()):
         if k in VOLATILE:
             continue
-        if isinstance(v, Path):
-            out[k] = stat(v) or str(v)
+        if isinstance(v, Path):  # music, font, a reference voice: by contents
+            out[k] = digest(v) or str(v)
         elif isinstance(v, (str, int, float, bool, type(None))):
             out[k] = v
         elif isinstance(v, (set, list, tuple)) and all(isinstance(x, (str, int, float)) for x in v):
             out[k] = sorted(v)
     return out
+
+
+def channel_settings(args):
+    """The resolved channel profile, as the render uses it: name, tagline, intro and outro colours, YouTube style, every
+    setting in its file (voice, speed, captions, music, ...), and each branding clip by its contents."""
+    import channels
+    profile = getattr(args, "profile", None)
+    if profile is None:
+        return None
+    return {"id": profile.id, "name": profile.name, "tagline": profile.tagline, "brand": profile.brand,
+            "youtube_style": profile.youtube_style, "options": profile.options,
+            "clips": {name: digest(profile.clip(*key)) for key, name in channels.CLIPS.items()}}
 
 
 def render_key(script, scenes, args):
@@ -58,13 +82,8 @@ def render_key(script, scenes, args):
     for s in scenes:
         files = [s.get("src"), s.get("src2"), *(s.get("srcs") or {}).values(), *(s.get("srcs2") or {}).values()]
         pictures.append([stat(f) for f in files if f] + [bool(s.get("stock")), bool(s.get("video"))])
-    branding = getattr(args, "branding", None)
-    clips = []
-    if branding is not None and getattr(branding, "channel", None):
-        import channels
-        clips = [stat(branding.channel.clip(*key)) for key in channels.CLIPS]
-    data = {"script": Path(script).read_text(encoding="utf-8-sig"), "pictures": pictures, "clips": clips,
-            "settings": settings(args), "code": code_version()}
+    data = {"script": Path(script).read_text(encoding="utf-8-sig"), "pictures": pictures,
+            "channel": channel_settings(args), "settings": settings(args), "code": code_version()}
     return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 

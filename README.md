@@ -25,7 +25,8 @@ or `DRAFT render: <Working folder>`.
 image services' keys when a scene needs a picture made, the voice engine and the Kokoro model, Remotion's packages) and stops
 with a clear message if something is missing; `--visuals-only` skips the voice and video checks. A final render keeps
 checkpoints in `Working/render/` (the narration, captions, Remotion's prepared pictures and bundle, each video's render),
-keyed to the script, the pictures, the settings and the code, so a run that fails part-way resumes from its last finished
+keyed to the script, the pictures, the settings, the resolved channel (tagline, colours, branding clips by their contents,
+voice, captions, music) and the code, so a run that fails part-way resumes from its last finished
 stage. `--fresh` starts over.
 
 The plain command is a full **final render**: Cloudflare writes every image prompt and draws every image (stock footage where it

@@ -170,5 +170,7 @@ def test_the_smart_village_boy_voice_is_kokoro_michael(monkeypatch):
     monkeypatch.setattr(channels, "CHANNELS_DIR", mv.ROOT / "channels")
     a = mv.parse_args(["s.txt"])
     assert a.channel_id == "smart_village_boy" and a.channel == "Smart Village Boy"
-    assert (a.engine, a.voice, a.rate) == ("kokoro", "am_michael", "+20%")
+    import tomllib
+    rate = tomllib.loads((mv.ROOT / "channels" / "smart_village_boy.toml").read_text(encoding="utf-8"))["rate"]
+    assert (a.engine, a.voice, a.rate) == ("kokoro", "am_michael", rate)  # the speed is the user's to tune
     assert (a.chatterbox_emotion, a.chatterbox_cfg, a.chatterbox_voice) == (0.5, 0.5, None)  # if switched to chatterbox

@@ -94,7 +94,7 @@ def analyse(script, args):
     import outputs
     out = outputs.Outputs.for_script(args.output, script, getattr(args, "channel_id", None))
     prompts_path = out.prompts
-    saved = ai_visuals.load_prompt_records(prompts_path)
+    saved = ai_visuals.load_prompt_records(prompts_path, scenes)
     sheet = ai_visuals.build_sheet(mv.parse_characters(script), ai_visuals.load_characters(prompts_path))
     draft = getattr(args, "draft", False)
     cloudflare_images = not draft  # a draft's images come from Pollinations
