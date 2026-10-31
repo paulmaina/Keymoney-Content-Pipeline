@@ -157,7 +157,7 @@ tagline = "Clever ideas from the world's villages"
 style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
 engine = "kokoro"
 voice = "am_michael"
-rate = "+20%"              # Kokoro speed 1.2; every engine follows rate
+rate = "+10%"              # Kokoro speed 1.1; every engine follows rate
 caption-style = "auto"
 music-volume = 0.2         # music = "..." when there is one
 youtube-style = "warm, curious and respectful: celebrate the villagers' ingenuity and the place, never pity or hype"

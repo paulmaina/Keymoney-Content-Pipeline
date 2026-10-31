@@ -16,8 +16,8 @@ as README.md and this skill).
 `[colors]` table that must stay last, image `style`, `engine`/`voice`/`rate`, Chatterbox settings, `caption-style`, `music`,
 `music-volume`, `youtube-style`, and any other option). Settings layer as `make_video.toml` < the channel's file < the command
 line. The channel is the script's `# channel: <id>` line, else `--channel`, else `default-channel` in `make_video.toml`
-(`smart_village_boy`). Outputs go to `Exports/<id>/<name>/`. Smart Village Boy's voice is Kokoro `am_michael` at `+20%` (the
-user's choice; Kokoro needs `download_models.py` once). `rate` drives every engine (Kokoro speed 1.2 = `+20%`); samples at
+(`smart_village_boy`). Outputs go to `Exports/<id>/<name>/`. Smart Village Boy's voice is Kokoro `am_michael` at `+10%` (the
+user's choice; Kokoro needs `download_models.py` once). `rate` drives every engine (Kokoro speed 1.1 = `+10%`); samples at
 1.0/1.1/1.15/1.2 are in `Exports/voice_samples/kokoro-am_michael-speed*.wav`.
 **Early checks, resuming and Upload:** `preflight` stops a run before any neurons or Kaggle time when a later step can't
 work (FFmpeg, keys for scenes that need pictures, the Kokoro model, Remotion's packages); `--visuals-only` skips the voice and
@@ -98,7 +98,7 @@ every scene, `--media mixed`), `--check-images` (~40 neurons an image) and Kaggl
 off for a run. It ends with `FINAL render: ready to upload from <Upload>`; a draft ends with `DRAFT render: <Working>`.
 Defaults live in `make_video.toml` (`default-channel`, then the [defaults] table, option names without dashes): those,
 `max-daily-neurons = 60000`, `draft-images = false` and the "alive" settings. The channel's look and sound (the photorealistic
-documentary style, Kokoro am_michael at +20%, caption style, music, YouTube style) are in `channels/smart_village_boy.toml`.
+documentary style, Kokoro am_michael at +10%, caption style, music, YouTube style) are in `channels/smart_village_boy.toml`.
 `Commands.txt` lists every default with the setting that changes it. `VIDEO_STYLE` in `.env` overrides only make_video.toml's
 style, not a channel's; command-line options override everything. So don't repeat those options unless changing them.
 
@@ -225,7 +225,7 @@ Run from the project root (not from Scripts/), in the background, since 20 scene
   one scene (`--style-test-scene N`, default the first AI scene) drawn in each style into `Working/style_tests/`, then stop. Both
   use Pollinations only (no Cloudflare neurons) and need `POLLINATIONS_API_KEY`.
 - The user's preferences (voice, speed, the photorealistic style) come from the channel's file, so they don't need to be
-  typed. Smart Village Boy uses Kokoro am_michael at +20% (offline, no Kaggle); `--engine chatterbox` for the Chatterbox
+  typed. Smart Village Boy uses Kokoro am_michael at +10% (offline, no Kaggle); `--engine chatterbox` for the Chatterbox
   "natural" voice on Kaggle, `--engine edge` for Emma.
   Other natural Multilingual edge voices: Andrew, Brian, Ava, Emma, en-AU-William. They need internet.
 - `--engine chatterbox`: Chatterbox on a free Kaggle T4, all lines in one batch, cached per line in `generated/voice/`
