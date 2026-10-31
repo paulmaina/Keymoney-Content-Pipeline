@@ -206,8 +206,9 @@ def test_two_shot_scenes_are_the_long_ones_and_can_be_turned_off():
 
 def test_stand_in_prompts_are_written_properly_next_time():
     rec = {"narration": "x", "prompt": "Scene illustrating: x", "stand_in": True}
-    assert av.saved_prompt({"x": rec}, {"text": "x"}) is None
-    assert av.saved_prompt({"x": {**rec, "stand_in": False}}, {"text": "x"}) == "Scene illustrating: x"
+    key = av.scene_id("x")
+    assert av.saved_prompt({key: rec}, {"text": "x", "id": key}) is None
+    assert av.saved_prompt({key: {**rec, "stand_in": False}}, {"text": "x", "id": key}) == "Scene illustrating: x"
 
 
 def test_check_shows_the_second_shots_neurons(tmp_path, capsys):
@@ -274,7 +275,7 @@ def test_preview_renders_only_the_picked_scenes_to_working_preview(tmp_path, mon
     monkeypatch.setattr(mv, "duration", lambda path: 12.0)
     monkeypatch.setattr(mv, "stamp_draft", lambda video, font: seen.setdefault("label", video))
 
-    def render_all(sc, work, narration, chunks, font, args, formats, out, script, parts):
+    def render_all(sc, work, narration, chunks, font, args, formats, out, script, parts, checkpoints=None):
         seen.update(formats=formats, video=out.video(formats[0]), parts=parts)
         return [], 0.0, 0.0
     monkeypatch.setattr(rr, "render_all", render_all)
@@ -284,7 +285,7 @@ def test_preview_renders_only_the_picked_scenes_to_working_preview(tmp_path, mon
     mv.main()
     assert seen["texts"] == ["Scene number 2 is here.", "Scene number 4 is here."]
     assert seen["formats"] == ["horizontal"] and seen["parts"] == []
-    assert seen["video"] == seen["label"] == tmp_path / "Exports" / "Story" / "Working" / "preview.mp4"
+    assert seen["video"] == seen["label"] == tmp_path / "Exports" / "smart_village_boy" / "Story" / "Working" / "preview.mp4"
 
 
 def test_a_rainforest_is_not_rain():

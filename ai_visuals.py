@@ -900,12 +900,72 @@ def load_prompt_file(path):
         return {}
 
 
-def load_prompt_records(path):
-    """Saved prompt records keyed by narration, so edits survive reordering the script."""
+def scene_id(text, n=1):
+    """A scene's stable id: its narration's hash and which occurrence of that narration it is (1, 2, ...). It survives
+    reordering the script, and two scenes with the same narration get their own ids, prompts and edits."""
+    return f"{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}-{n}"
+
+
+def assign_ids(scenes):
+    """Set s["id"] on every scene of a script (all of them, so a scene's occurrence number never depends on which
+    scenes a run draws)."""
+    seen = {}
+    for s in scenes:
+        seen[s["text"]] = seen.get(s["text"], 0) + 1
+        s["id"] = scene_id(s["text"], seen[s["text"]])
+    return scenes
+
+
+def migrate_records(records, scenes):
+    """Match prompt records saved before ids existed to the script's scenes (the full list, with ids from assign_ids)
+    and give each its scene's id. A record matches the scene with its stored scene number when that scene has the same
+    narration and the same visual description (a record saved without a description only when its narration appears
+    once in the script, so a reordered repeat can't take another copy's place); failing that, the one scene not yet
+    matched with the same narration and visual description. A record is never given a scene whose description differs
+    from its own. Anything else can't be matched with confidence and is returned in `unmatched`, never dropped. Every
+    other field, including the user's edited prompts, is kept as it is. Returns (records with ids, unmatched records)."""
+    records = [r for r in records if isinstance(r, dict)]
+    old = [r for r in records if not r.get("id")]
+    taken = {r["id"] for r in records if r.get("id")}
+    copies = {}
+    for s in scenes:
+        copies[s["text"]] = copies.get(s["text"], 0) + 1
+    pending = []
+    for r in old:  # first by stored scene number, narration and description
+        n = r.get("scene")
+        s = scenes[n - 1] if isinstance(n, int) and 1 <= n <= len(scenes) else None
+        if r.get("description") is None:  # no saved description: the number is only trusted for a line said once
+            same = s is not None and copies.get(s["text"]) == 1
+        else:
+            same = s is not None and s.get("description", "") == r["description"]
+        if same and s["text"] == r.get("narration") and s["id"] not in taken:
+            r["id"] = s["id"]
+            taken.add(s["id"])
+        else:
+            pending.append(r)
+    unmatched = []
+    for r in pending:  # then by narration and visual description, when exactly one scene fits
+        fits = [s for s in scenes if s["id"] not in taken and s["text"] == r.get("narration")
+                and s.get("description", "") == r.get("description", "")]
+        if len(fits) == 1:
+            r["id"] = fits[0]["id"]
+            taken.add(r["id"])
+        else:
+            unmatched.append(r)
+    return [r for r in records if r.get("id")], unmatched
+
+
+def load_prompt_records(path, scenes=None):
+    """Saved prompt records keyed by scene id (see scene_id), so edits survive reordering the script and repeated
+    narration keeps one record per scene. Records from before ids are matched to `scenes` (the script's full scene
+    list) as they're read; without scenes, only records that already have an id count."""
     try:
-        return {s["narration"]: s for s in load_prompt_file(path)["scenes"] if s.get("prompt")}
+        records = list(load_prompt_file(path)["scenes"])
     except (KeyError, TypeError, AttributeError):
         return {}
+    if scenes is not None:
+        records, _ = migrate_records(records, assign_ids(scenes))
+    return {s["id"]: s for s in records if isinstance(s, dict) and s.get("prompt") and s.get("id")}
 
 
 def load_prompts(path):
@@ -913,9 +973,11 @@ def load_prompts(path):
 
 
 def saved_prompt(records, scene):
-    """The saved prompt for a scene, if it was written for the same narration and visual description.
+    """The saved prompt for a scene (by its id), if it was written for the same narration and visual description.
     A new or edited description line means the prompt is written again."""
-    rec = records.get(scene["text"])
+    rec = records.get(scene.get("id") or scene_id(scene["text"]))
+    if rec and rec.get("narration", scene["text"]) != scene["text"]:
+        rec = None
     if rec and rec.get("description", "") == scene.get("description", "") and not rec.get("stand_in"):
         return rec["prompt"]
     return None
@@ -1026,12 +1088,22 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     if fresh and not regenerate:
         print(f"  the style changed since {prompts_path.name} was written: writing new prompts and character "
               "descriptions for it (your '# character:' lines are kept)")
-    saved = {} if fresh else load_prompt_records(prompts_path)
+    assign_ids(scenes)
+    file = {} if fresh else load_prompt_file(prompts_path)
+    matched, unmatched = migrate_records(list(file.get("scenes") or []), scenes)
+    unmatched = [r for r in file.get("unmatched") or [] if isinstance(r, dict)] + unmatched
+    if len(unmatched) > len(file.get("unmatched") or []):
+        print(f"  WARNING: {len(unmatched) - len(file.get('unmatched') or [])} saved prompt(s) in {prompts_path.name} "
+              "from before scene ids couldn't be matched to a scene with confidence; they're kept under \"unmatched\" "
+              "in the file (copy any edit you want back into its scene's prompt)")
+    saved = {r["id"]: r for r in matched if r.get("prompt")}
     # scenes of this script not drawn this run (stock, own files, outside a preview) keep their saved records;
-    # records for narration the script no longer has are dropped
-    others = {s["text"] for s in scenes} - {s["text"] for _, s in targets}
-    kept = [] if fresh else [r for r in load_prompt_file(prompts_path).get("scenes", [])
-                             if isinstance(r, dict) and r.get("narration") in others]
+    # records for scenes the script no longer has are dropped
+    others = {s["id"] for s in scenes} - {s["id"] for _, s in targets}
+    kept = [r for r in matched if r.get("id") in others]
+    numbers = {s["id"]: n for n, s in enumerate(scenes, 1)}
+    for r in kept:  # a kept record follows its scene when the script is reordered
+        r["scene"] = numbers[r["id"]]
     sheet = build_sheet(characters, {} if fresh else load_characters(prompts_path))
     sizes = providers.sizes(formats)
     shapes = " + ".join("x".join(map(str, dims(z))) for z in sizes)
@@ -1044,9 +1116,9 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     for i, s in targets:
         description = s.get("description", "")
         prompt = saved_prompt(saved, s)
-        rec = {"scene": i + 1, "description": description, "narration": s["text"]}
+        rec = {"scene": i + 1, "id": s["id"], "description": description, "narration": s["text"]}
         if prompt:
-            old = saved[s["text"]]
+            old = saved[s["id"]]
             if old.get("prompt2") and old.get("prompt2_for") == prompt:  # a second shot written for this same prompt
                 rec.update(prompt2=old["prompt2"], prompt2_for=prompt)
         else:
@@ -1073,8 +1145,10 @@ def generate_scene_visuals(scenes, prompts_path, model=IMAGE_MODEL, style="", re
     def save(records):
         prompts_path.parent.mkdir(parents=True, exist_ok=True)
         every = sorted(kept + records, key=lambda r: r.get("scene", 0))
-        prompts_path.write_text(json.dumps({"image_model": providers.image_model, "style": style, "characters": sheet,
-                                            "scenes": every}, indent=2, ensure_ascii=False), encoding="utf-8")
+        data = {"image_model": providers.image_model, "style": style, "characters": sheet, "scenes": every}
+        if unmatched:
+            data["unmatched"] = unmatched
+        prompts_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     save(records)
     print(f"  prompts saved to {prompts_path} (edit them and rerun to change the images)")

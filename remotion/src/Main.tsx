@@ -34,15 +34,15 @@ export const Main: React.FC<Props> = (props) => {
     );
   };
   if (props.introFrames) {
-    add('Intro', props.introFrames, <Intro channel={props.channel} tagline={props.tagline} part={props.part} />);
+    add('Intro', props.introFrames, <Intro channel={props.channel} tagline={props.tagline} part={props.part} clip={props.introClip} brand={props.brand} />);
   }
   props.scenes.forEach((s, i) => add(`Scene ${i + 1}`, s.frames, <Scene scene={s} />, s.transition));
   if (props.outroFrames) {
     const next = props.part && props.part.index < props.part.count ? props.part.index + 1 : null;
-    add('Outro', props.outroFrames, <Outro channel={props.channel} next={next} />);
+    add('Outro', props.outroFrames, <Outro channel={props.channel} next={next} clip={props.outroClip} brand={props.brand} />);
   }
   return (
-    <AbsoluteFill style={{backgroundColor: BRAND.night}}>
+    <AbsoluteFill style={{backgroundColor: (props.brand ?? BRAND).night}}>
       <TransitionSeries>{items}</TransitionSeries>
       <Places places={props.places} />
       <Captions lines={props.captions} style={props.captionStyle} />

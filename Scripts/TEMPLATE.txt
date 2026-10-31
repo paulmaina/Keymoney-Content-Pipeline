@@ -1,4 +1,5 @@
 # Five Village Water Hacks That Beat Drought
+# channel: smart_village_boy
 # note: Example script from SCRIPT_GUIDE.md. Copy it, keep the structure, replace the content.
 # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, yellow T-shirt, short black hair, bright smile
 

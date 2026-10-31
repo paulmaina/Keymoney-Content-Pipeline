@@ -52,7 +52,7 @@ def thumbnail_ideas(args, script, scenes, font_path, out, providers):
     words = youtube_meta.fallback(script, scenes, [], args.channel)["thumbnail_text"]
     sheet = ai_visuals.build_sheet(mv.parse_characters(script), ai_visuals.load_characters(out.prompts))
     first = next((s for s in scenes if not s["visual"]), scenes[0])
-    shot = base_prompt(first, ai_visuals.load_prompt_records(out.prompts), providers, args.style, sheet)
+    shot = base_prompt(first, ai_visuals.load_prompt_records(out.prompts, scenes), providers, args.style, sheet)
     size = "horizontal"
     print(f"Thumbnail ideas: {args.thumbnail_ideas} option(s) with Pollinations, words \"{words}\", into {folder}")
     made = []
@@ -102,6 +102,7 @@ def style_test(args, script, scenes, out, providers):
 def run(args, script, scenes, font_path, out):
     """--thumbnail-ideas and/or --style-test, then stop."""
     providers = providers_for(args)
+    ai_visuals.assign_ids(scenes)  # saved prompts are found by scene id
     if args.thumbnail_ideas:
         thumbnail_ideas(args, script, scenes, font_path, out, providers)
     if args.style_test:

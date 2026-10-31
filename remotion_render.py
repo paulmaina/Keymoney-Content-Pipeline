@@ -10,7 +10,8 @@ exactly as the ffmpeg renderer does, so both renderers sound the same.
     centred on the narration boundary.
   - Captions pop in line by line with the spoken word in yellow; a label names each new place, and a world map drops a
     pin the first time each country comes up (see places.py).
-  - A 2-second branded intro and a 3.5-second outro (--no-branding skips them).
+  - A 2-second branded intro and a 3.5-second outro in the channel's colours, or the channel's own clips from
+    channels/<id>/branding/ (fitted to the frame, with their own sound; see channels.py). --no-branding skips them.
 """
 import json
 import os
@@ -396,11 +397,67 @@ def concurrency():
     return max(1, (os.cpu_count() or 4) // 2)
 
 
+def branding_ends(args, fmt, part=None):
+    """(intro frames, outro frames, intro clip, outro clip) of one video: the channel's own clips where it has them
+    (args.branding: channels.Branding), the generated intro and outro otherwise, none with --no-branding."""
+    if getattr(args, "no_branding", False):
+        return 0, 0, None, None
+    br = getattr(args, "branding", None)
+    if not br:
+        return INTRO, OUTRO, None, None
+    kind = br.outro_kind(part)
+    return br.frames("intro", fmt), br.frames(kind, fmt), br.clip("intro", fmt), br.clip(kind, fmt)
+
+
+def lead_seconds(args, fmt):
+    """Seconds before the narration starts in a video of this format (its intro, less half the crossfade)."""
+    intro = branding_ends(args, fmt)[0]
+    return (intro - TRANSITION // 2 if intro else TRANSITION // 2) / mv.FPS
+
+
+def count_frames(video):
+    """The number of video frames FFmpeg actually decodes from a file."""
+    out = mv.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                  "stream=nb_read_frames", "-of", "csv=p=0", str(video)])
+    try:
+        return int(out.strip().split(",")[0])
+    except ValueError:
+        return None
+
+
+def prepare_clip(src, fmt, frames, public, stem):
+    """A branding clip fitted inside the format's frame (resized and padded with black, never stretched or cropped),
+    at 30 fps and exactly `frames` long, silent, in the public dir; and its own sound as a wav of exactly the same
+    length, or None when it has none. `frames` is the clip's scheduled length, from its longest stream: when its sound
+    runs on after its picture, the last frame is held for the whole of it. The prepared clip's frame count is checked
+    before anything is rendered. Returns (video file name, audio path or None)."""
+    import channels
+    w, h = mv.FORMATS[fmt]["size"]
+    video = public / f"{stem}.mp4"
+    hold = frames / mv.FPS + 1  # seconds of held last frame: enough for any picture shorter than the schedule
+    mv.run(["ffmpeg", "-y", "-i", src, "-vf",
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"setsar=1,fps={mv.FPS},tpad=stop_mode=clone:stop_duration={hold:.3f}",
+            "-frames:v", str(frames), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            video])
+    got = count_frames(video)
+    if got != frames:
+        sys.exit(f"Branding clip {Path(src).name}: the prepared {fmt} clip has {got} frames, not the {frames} the "
+                 "timeline needs. Re-export it as an MP4 (H.264, 30 fps) and try again.")
+    audio = None
+    if (channels.probe(src) or {}).get("audio"):
+        audio = public.parent / f"{stem}.wav"
+        mv.run(["ffmpeg", "-y", "-i", src, "-vn", "-af", "apad", "-t", f"{frames / mv.FPS:.3f}", "-ar", "48000",
+                "-ac", "2", audio])
+    return video.name, audio
+
+
 def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, places_, args, fps=mv.FPS, part=None,
-                transitions=None):
+                transitions=None, intro=None, outro=None, intro_clip=None, outro_clip=None):
     """Props for one video. part = (k, n) for part k of n of the vertical series: "Part k of N" in the intro, and
     "Watch Part k+1" instead of the subscribe card in every outro but the last. moves: a name, or a list of names
-    (one per shot), per scene."""
+    (one per shot), per scene. intro, outro: their frames (default: the generated ones, or none with --no-branding);
+    intro_clip, outro_clip: the channel's own clips in the public dir, which replace the drawn ones."""
     import overlays
     w, h = mv.FORMATS[fmt]["size"]
     camera = getattr(args, "camera", "calm")
@@ -426,11 +483,14 @@ def build_props(fmt, scenes, assets, moves, lengths, bounds, total, lines, place
             props.update(shots=shot_props, parallax=depth,
                          overlays=overlays.choose(s) if getattr(args, "overlays", False) else [])
         props_scenes.append(props)
+    profile = getattr(args, "profile", None)
     return {"width": w, "height": h, "fps": fps, "durationInFrames": total, "transitionFrames": TRANSITION,
-            "introFrames": 0 if args.no_branding else INTRO, "outroFrames": 0 if args.no_branding else OUTRO,
-            "font": "font.ttf", "channel": args.channel, "tagline": TAGLINE, "scenes": props_scenes,
-            "captions": lines, "captionStyle": caption_style(fmt, args), "places": places_,
-            "part": {"index": part[0], "count": part[1]} if part else None}
+            "introFrames": (0 if args.no_branding else INTRO) if intro is None else intro,
+            "outroFrames": (0 if args.no_branding else OUTRO) if outro is None else outro,
+            "font": "font.ttf", "channel": args.channel, "tagline": profile.tagline if profile else TAGLINE,
+            "scenes": props_scenes, "captions": lines, "captionStyle": caption_style(fmt, args), "places": places_,
+            "part": {"index": part[0], "count": part[1]} if part else None,
+            "introClip": intro_clip, "outroClip": outro_clip, "brand": profile.brand if profile else None}
 
 
 def caption_style(fmt, args):
@@ -488,13 +548,23 @@ def plan_cuts(scenes, formats, out, parts):
     return cuts
 
 
-def render_all(scenes, work, narration, chunks, font_path, args, formats, out, script, parts=None):
+class _NoCheckpoints:
+    def get(self, stage):
+        return None
+
+    def save(self, stage, value=True):
+        pass
+
+
+def render_all(scenes, work, narration, chunks, font_path, args, formats, out, script, parts=None, checkpoints=None):
     """Render every format with Remotion: the horizontal video from the whole script, and the vertical one as the
     `parts` [(first, end)] of a Shorts series when there are several. Returns (output paths, seconds before the
-    narration starts, total seconds) for the full-length video."""
+    narration starts, total seconds) for the full-length video. `checkpoints` (checkpoints.Checkpoints): the prepared
+    pictures and clips, the bundle and each video's silent render are kept, and reused when a failed run resumes."""
+    done = checkpoints or _NoCheckpoints()
     ensure_installed()
     fps = mv.FPS
-    intro, outro = (0, 0) if args.no_branding else (INTRO, OUTRO)
+    intro, outro = branding_ends(args, formats[0])[:2]
     durations = [s["dur"] for s in scenes]
     lead, lengths, bounds, total = timeline(durations, fps, intro, outro)
     rwork = work / "remotion"
@@ -506,7 +576,11 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
     state, assets, moves = {}, {}, {}
     camera = getattr(args, "camera", "calm")
     for fmt in formats:
-        assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
+        if (saved := done.get(f"assets_{fmt}")) is not None and len(saved) == len(scenes):
+            assets[fmt] = saved
+        else:
+            assets[fmt] = prepare_assets(scenes, public, args, fmt, state, lengths)
+            done.save(f"assets_{fmt}", assets[fmt])
         counts = [len(a.get("shots") or [a]) for a in assets[fmt]]
         masked = {(i, j) for i, a in enumerate(assets[fmt]) for j, sh in enumerate(a.get("shots") or [a]) if sh.get("mask")}
         moves[fmt] = plan_shot_moves(counts, script.stem, masked, camera)
@@ -518,7 +592,7 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
     if two:
         print(f"  {two} scene(s) cut between two shots")
     cuts = plan_cuts(scenes, formats, out, parts)
-    frames = {c: timeline(durations[c[1]:c[2]], fps, intro, outro)[3] for c in cuts}
+    frames = {c: timeline(durations[c[1]:c[2]], fps, *branding_ends(args, c[0], c[3])[:2])[3] for c in cuts}
     n_parts = sum(c[3] is not None for c in cuts)
     print(f"  {len(scenes)} scenes, parallax on {parallax}"
           f"{f'; the vertical video is a series of {n_parts} Shorts' if n_parts else ''}")
@@ -527,9 +601,27 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
           f"({'measured on this PC' if load_speed()[1] else 'first-run guess; the next estimate uses your real speed'}, "
           f"{concurrency()} parallel frames)")
 
-    print("Bundling the Remotion project...")
+    clips = {}  # the channel's own intro and outro clips, fitted to each format; before the bundle copies public/
+    for fmt, _, _, part, _ in cuts:
+        c_intro, c_outro, intro_src, outro_src = branding_ends(args, fmt, part)
+        for src, n in ((intro_src, c_intro), (outro_src, c_outro)):
+            if src and (src, fmt) not in clips:
+                stage = f"clip_{fmt}_{Path(src).name}"
+                if (saved := done.get(stage)) and (public / saved[0]).exists():
+                    clips[(src, fmt)] = (saved[0], Path(saved[1]) if saved[1] else None)
+                else:
+                    clips[(src, fmt)] = prepare_clip(src, fmt, n, public, f"branding_{Path(src).stem}")
+                    name, audio = clips[(src, fmt)]
+                    done.save(stage, [name, str(audio) if audio else None])
+
     bundle = rwork / "bundle"
-    npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={bundle}", "--log=error", capture=True)
+    if done.get("bundle") and (bundle / "index.html").exists():
+        print("Remotion bundle: from the last run")
+    else:
+        print("Bundling the Remotion project...")
+        npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={bundle}", "--log=error",
+            capture=True)
+        done.save("bundle")
 
     starts = [sum(durations[:i]) for i in range(len(scenes) + 1)]  # where each scene starts in the narration
     outs, wrote_sfx = [], False
@@ -537,17 +629,24 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
         fmt, a, b, part, video = cut
         name = f"{fmt}_part{part[0]}" if part else fmt
         sub = scenes[a:b]
-        c_lead, c_lengths, c_bounds, c_total = timeline(durations[a:b], fps, intro, outro)
+        c_intro, c_outro, intro_src, outro_src = branding_ends(args, fmt, part)
+        c_lead, c_lengths, c_bounds, c_total = timeline(durations[a:b], fps, c_intro, c_outro)
+        sounds = [(clips[(src, fmt)][1], at / fps)  # the clips' own sound on this video's timeline
+                  for src, at in ((intro_src, 0), (outro_src, c_total - c_outro)) if src and clips[(src, fmt)][1]]
+        intro_clip = clips[(intro_src, fmt)][0] if intro_src else None
+        outro_clip = clips[(outro_src, fmt)][0] if outro_src else None
         places_ = place_props(sub, script, c_bounds, fps, fmt, first=a)
         lines = caption_layouts(shift_chunks(chunks, starts[a], starts[b]) if chunks else chunks, sub, script, [fmt],
                                 args, fps, c_lead, c_bounds, {fmt: map_blocks(places_, fmt)}, first=a)[fmt]
         voice = narration if (a, b) == (0, len(scenes)) else cut_audio(narration, starts[a], starts[b],
                                                                        rwork / f"narration_{name}.wav")
-        audio = timeline_audio(voice, c_lead / fps, c_total / fps, rwork, f"timeline_{name}.wav")
+        audio = timeline_audio(voice, c_lead / fps, c_total / fps, rwork, f"timeline_{name}.wav", sounds)
         props = rwork / f"props_{name}.json"
         props.write_text(json.dumps(build_props(fmt, sub, assets[fmt][a:b], moves[fmt][a:b], c_lengths, c_bounds,
                                                 c_total, lines, places_, args, part=part,
-                                                transitions=plan_transitions(sections[a:b], camera)),
+                                                transitions=plan_transitions(sections[a:b], camera),
+                                                intro=c_intro, outro=c_outro, intro_clip=intro_clip,
+                                                outro_clip=outro_clip),
                                     ensure_ascii=False), encoding="utf-8")
         ambience = None
         if getattr(args, "sound_effects", False):
@@ -562,19 +661,65 @@ def render_all(scenes, work, narration, chunks, font_path, args, formats, out, s
         silent = rwork / f"{name}_silent.mp4"
         w, h = mv.FORMATS[fmt]["size"]
         label = f"{fmt} part {part[0]} of {part[1]} (scenes {a + 1}-{b})" if part else fmt
-        print(f"Rendering {label} ({w}x{h}) with Remotion...")
         t0 = time.time()
-        npx("remotion", "render", bundle, "Main", silent, f"--props={props}", "--codec=h264", "--crf=18",
-            "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
-        save_speed(fmt, (time.time() - t0) / c_total)
-        print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
-        outs.append(mv.mux(silent, audio, args, video, cwd=rwork, video_codec=["-c:v", "copy"], ambience=ambience))
+        if done.get(f"render_{name}") and silent.exists():
+            print(f"Rendering {label}: from the last run; mixing the voice{' and music' if args.music else ''}...")
+        else:
+            print(f"Rendering {label} ({w}x{h}) with Remotion...")
+            npx("remotion", "render", bundle, "Main", silent, f"--props={props}", "--codec=h264", "--crf=18",
+                "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
+            save_speed(fmt, (time.time() - t0) / c_total)
+            done.save(f"render_{name}")
+            print(f"  {label}: {time.time() - t0:.0f} s; mixing the voice{' and music' if args.music else ''}...")
+        # music fades in after the channel's own intro, so it never plays over the intro's sound
+        outs.append(mv.mux(silent, audio, args, video, cwd=rwork, video_codec=["-c:v", "copy"], ambience=ambience,
+                           music_start=c_intro / fps if intro_src else 0.0))
     return outs, lead / fps, total / fps
 
 
-def timeline_audio(narration, lead, total, work, name="narration_timeline.wav"):
-    """The narration placed on the final timeline: silence for the intro, then the voice, padded to the outro's end."""
+def timeline_audio(narration, lead, total, work, name="narration_timeline.wav", sounds=()):
+    """The narration placed on the final timeline: silence for the intro, then the voice, padded to the outro's end.
+    sounds: [(wav, start seconds)] mixed in at full level, the branding clips' own sound."""
     out = work / name
     ms = round(lead * 1000)
-    mv.run(["ffmpeg", "-y", "-i", narration, "-af", f"adelay={ms}|{ms},apad", "-t", f"{total:.3f}", out])
+    if not sounds:
+        mv.run(["ffmpeg", "-y", "-i", narration, "-af", f"adelay={ms}|{ms},apad", "-t", f"{total:.3f}", out])
+        return out
+    inputs, graph = ["-i", str(narration)], [f"[0:a]aresample=48000,aformat=channel_layouts=stereo,adelay={ms}|{ms}[s0]"]
+    for k, (wav, start) in enumerate(sounds, 1):
+        d = round(start * 1000)
+        inputs += ["-i", str(wav)]
+        graph.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo,adelay={d}|{d}[s{k}]")
+    labels = "".join(f"[s{k}]" for k in range(len(sounds) + 1))
+    graph.append(f"{labels}amix=inputs={len(sounds) + 1}:duration=longest:normalize=0,apad[a]")
+    mv.run(["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(graph), "-map", "[a]", "-t", f"{total:.3f}", out])
     return out
+
+
+def render_branding_templates(channel, targets):
+    """The generated intro and outro of a channel as stand-alone silent clips: targets = {(kind, format): path}, kind
+    "intro", "outro" or "next" (the "Watch Part 2" card). For the user to edit into their own clips."""
+    import tempfile
+    from types import SimpleNamespace
+    ensure_installed()
+    work = Path(tempfile.mkdtemp(prefix="branding_templates_"))
+    public = work / "public"
+    public.mkdir()
+    font = channel.options.get("font")
+    shutil.copy(mv.ROOT / font if font else mv.DEFAULT_FONT, public / "font.ttf")
+    npx("remotion", "bundle", "src/index.ts", f"--public-dir={public}", f"--out-dir={work / 'bundle'}", "--log=error",
+        capture=True)
+    args = SimpleNamespace(no_branding=False, channel=channel.name, profile=channel, caption_style="auto")
+    written = []
+    for (kind, fmt), path in targets.items():
+        intro, outro = (INTRO, 0) if kind == "intro" else (0, OUTRO)
+        props = build_props(fmt, [], [], [], [], [], intro or outro, [], [], args, part=(1, 2) if kind == "next" else None,
+                            intro=intro, outro=outro)
+        props_file = work / f"props_{kind}_{fmt}.json"
+        props_file.write_text(json.dumps(props, ensure_ascii=False), encoding="utf-8")
+        print(f"Rendering {path.name}...")
+        npx("remotion", "render", work / "bundle", "Main", path, f"--props={props_file}", "--codec=h264", "--crf=18",
+            "--muted", f"--concurrency={concurrency()}", "--gl=angle", "--log=warn")
+        written.append(path)
+    shutil.rmtree(work, ignore_errors=True)
+    return written

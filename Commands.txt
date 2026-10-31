@@ -6,6 +6,11 @@ From script to YouTube upload. Run every command in PowerShell from the project 
 
 README.md has the full detail on every feature. Keep this file up to date whenever an option, default or step changes.
 
+Every video belongs to a channel. Each channel has its own settings file, channels\<channel>.toml (name, intro and
+outro, image style, voice, speed, captions, music, YouTube text style), its own branding clips folder and its own
+Exports\<channel>\ folder, so channels never mix. The examples below use Smart Village Boy (smart_village_boy), the
+default channel. Section 7 shows how to make a new channel and add your own intro and outro clips.
+
 
 1. ONE-TIME SETUP
 -----------------
@@ -21,7 +26,7 @@ README.md has the full detail on every feature. Keep this file up to date whenev
 3. Models:
    - Downloaded automatically on first use: the Whisper caption model (~140 MB), the parallax depth model (99 MB, in models\),
      the face detector (230 KB, in models\) and Remotion's packages (~250 MB, in remotion\node_modules).
-   - Only for the offline voice (--engine kokoro), download the Kokoro voice (~340 MB) once:
+   - The Kokoro voice (~340 MB; Smart Village Boy's voice, am_michael), download it once:
        .venv\Scripts\python download_models.py
 
 4. Keys: copy .env.example to .env and fill it in. .env is gitignored: never commit it, share it or paste it anywhere.
@@ -42,7 +47,8 @@ README.md has the full detail on every feature. Keep this file up to date whenev
        Cloudflare    every final image and image prompt, the image quality check, stock scoring, YouTube
                      titles/description. The account is on the Workers Paid plan: past the free 10,000 neurons a day
                      it bills (section 5), up to your daily cap.
-       Kaggle        the Chatterbox voice and the image upscaling on every final render (free GPU)
+       Kaggle        the image upscaling on every final render, and the Chatterbox voice when a channel uses it
+                     (free GPU)
        Pixabay /
        Pexels        stock footage and photos (use either or both; with neither, every scene gets an AI image)
        Pollinations  only three jobs: drafts (--draft, --preview-scenes), the emergency backup in a final render,
@@ -52,11 +58,15 @@ README.md has the full detail on every feature. Keep this file up to date whenev
        .venv\Scripts\python -m pytest -q
        .venv\Scripts\python make_video.py Scripts\TEMPLATE.txt --check
 
-Your defaults are in make_video.toml. Options typed on the command line always win over the file; VIDEO_STYLE in .env
-overrides style. Every default, and how to change it (a make_video.toml line, or an option for one run):
+Settings come in three layers: make_video.toml (for every channel) < channels\<channel>.toml (that channel's look and
+sound) < options typed on the command line, which always win. VIDEO_STYLE in .env overrides make_video.toml's style,
+but not a channel's. Every default, and how to change it (a line in the file shown, or an option for one run):
 
     What                       Default                              make_video.toml          one run
     -------------------------  -----------------------------------  -----------------------  ------------------------
+    Channel                    smart_village_boy                    default-channel = "..."  --channel ...
+                                                                    (or "# channel: ..." at the top of the script,
+                                                                    which wins over both)
     Final or draft             FINAL render                         draft-images = true      --draft
     AI images / stock          on                                   generate-visuals = false --no-generate-visuals
     Stock or AI mix            mixed (stock where it fits well)     media = "stock" / "ai"   --media stock / ai
@@ -69,17 +79,10 @@ overrides style. Every default, and how to change it (a make_video.toml line, or
     Prompt writer              llama-3.3-70b-instruct-fp8-fast      text-model = "..."       --text-model ...
     Vision check model         llama-4-scout-17b-16e-instruct       vision-model = "..."     --vision-model ...
     YouTube notes model        llama-3.3-70b-instruct-fp8-fast      metadata-model = "..."   --metadata-model ...
-    Style                      photorealistic documentary photo...  style = "..."            --style "..."
     Second shots (over 6 s)    on                                   two-shots = false        --no-two-shots
     Formats                    both (video + Shorts)                format = "horizontal"    --format vertical
-    Voice engine               chatterbox (Kaggle; Emma fallback)   engine = "edge"          --engine edge
-    Chatterbox emotion / cfg   0.5 / 0.5                            chatterbox-emotion = ..  --chatterbox-emotion ..
-    Chatterbox reference voice built-in voice                       chatterbox-voice = ".."  --chatterbox-voice ..
-    Edge voice                 en-US-EmmaMultilingualNeural         voice = "..."            --voice ...
-    Speaking rate              +5%                                  rate = "+10%"            --rate +10%
     Renderer                   remotion                             renderer = "ffmpeg"      --renderer ffmpeg
     Intro and outro            on                                   no-branding = true       --no-branding
-    Caption style              auto (bold vertical, clean horiz.)   caption-style = "bold"   --caption-style clean
     Captions                   on, whisper "base", 6 words a line   no-captions = true,      --no-captions,
                                                                     whisper-model, caption-words
     Parallax                   strong                               depth = "subtle"         --depth off
@@ -87,20 +90,39 @@ overrides style. Every default, and how to change it (a make_video.toml line, or
     Camera                     bold                                 camera = "calm"          --camera calm
     Ambience                   on, volume 0.5                       sound-effects = false,   --no-sound-effects,
                                                                     sfx-volume = 0.3         --sfx-volume 0.3
-    Music                      none (volume 0.2 when used)          music = "..."            --music "..."
     YouTube notes + thumbnail  on                                   no-metadata = true       --no-metadata
-    Channel name               Smart Village Boy                    channel = "..."          --channel "..."
+
+Smart Village Boy's own settings (channels\smart_village_boy.toml). Any make_video option can go in a channel's file,
+and any of these lines can move to make_video.toml to apply to every channel that doesn't set it:
+
+    What                       Smart Village Boy                    channels\<channel>.toml  one run
+    -------------------------  -----------------------------------  -----------------------  ------------------------
+    Name and tagline           Smart Village Boy, "Clever ideas     name = "...",            (none)
+                               from the world's villages"           tagline = "..."
+    Intro / outro colours      yellow, red, deep evening blue       [colors] table, LAST     (none)
+    Own intro / outro clips    none yet (the generated ones)        channels\<channel>\branding\ (section 7)
+    Style                      photorealistic documentary photo...  style = "..."            --style "..."
+    Voice engine               kokoro (offline)                     engine = "chatterbox"    --engine edge
+    Voice                      am_michael                           voice = "..."            --voice af_heart
+    Speaking rate              +20% (Kokoro speed 1.2)              rate = "+15%"            --rate +15%
+    Chatterbox emotion / cfg   0.5 / 0.5 (engine = "chatterbox")    chatterbox-emotion = ..  --chatterbox-emotion ..
+    Chatterbox reference voice built-in voice                       chatterbox-voice = ".."  --chatterbox-voice ..
+    Caption style              auto (bold vertical, clean horiz.)   caption-style = "bold"   --caption-style clean
+    Music                      none (volume 0.2 when used)          music = "..."            --music "..."
+    YouTube text style         warm, curious and respectful...      youtube-style = "..."    (none)
 
 
 2. SCRIPT FORMAT
 ----------------
 Save a .txt file in Scripts\. Each paragraph (separated by a blank line) is one scene: 2-3 spoken sentences.
+Put "# channel: <channel>" at the top for any channel but the default (it wins over --channel and default-channel).
 Your scripts stay on this PC: Scripts\ is gitignored except TEMPLATE.txt, and so are Exports\ and Research\.
 No length cap: plan 8-10 minute videos or longer, about 6-8 scenes and 150 words a minute (50-75 scenes). The vertical
 video is split into Shorts automatically, at chapter headings, so open every # HACK section with a strong first line.
-The full standard is SCRIPT_GUIDE.md (give it to your scripting project); Scripts\TEMPLATE.txt is a worked example:
-copy it to start a new script.
+The full standard is SCRIPT_GUIDE.md (give it to your scripting project): the general format, then a short style
+section per channel. Scripts\TEMPLATE.txt is a worked example: copy it to start a new script.
 
+    # channel: smart_village_boy       At the top: the channel (its settings, branding and Exports folder).
     # character: Name = description    A recurring INVENTED person: age, origin, build, hair, clothes, colours. Keeps them
                                        the same in every scene that names them. Never a real person: describe real
                                        people by role and clothing in the # Visuals lines instead.
@@ -119,6 +141,7 @@ Tags only count at the start of a line. Write visual descriptions on # Visuals l
 
 Short example:
 
+    # channel: smart_village_boy
     # character: Smart Village Boy = Kenyan boy, twelve years old, dark skin, red cap, green T-shirt
     # note: this line is a comment
 
@@ -148,45 +171,62 @@ Short example:
 5. Optional, before spending on the final images:
    - Review the image prompts (~50 neurons a scene):
          .venv\Scripts\python make_video.py Scripts\MyVideo.txt --prompts-only
-     Edit Exports\MyVideo\Working\prompts.json or the # Visuals lines, then carry on.
+     Edit Exports\smart_village_boy\MyVideo\Working\prompts.json or the # Visuals lines, then carry on.
    - Brainstorm a style or thumbnails with Pollinations (no Cloudflare neurons):
          .venv\Scripts\python make_video.py Scripts\MyVideo.txt --style-test "watercolour | 3D animated film"
          .venv\Scripts\python make_video.py Scripts\MyVideo.txt --thumbnail-ideas 4
    - Watch a quick draft of the whole video with Pollinations pictures:
-         .venv\Scripts\python make_video.py Scripts\MyVideo.txt --draft --engine edge
-     It goes to Exports\MyVideo\Working\MyVideo_DRAFT.mp4 with a red DRAFT label, never to Upload\. Its prompts are
-     Cloudflare's and are kept, so the final render reuses them; its pictures never are.
+         .venv\Scripts\python make_video.py Scripts\MyVideo.txt --draft
+     It goes to Exports\smart_village_boy\MyVideo\Working\MyVideo_DRAFT.mp4 with a red DRAFT label, never to
+     Upload\. Its prompts are Cloudflare's and are kept, so the final render reuses them; its pictures never are.
 6a. Doesn't fit under the cap? Make the visuals first, once a day, until --check shows 0 new images (or raise
     max-daily-neurons in make_video.toml):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --visuals-only
 6. Render:
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt
    That's the whole command, a FINAL render: Cloudflare images (stock where it fits better), the image check, Kaggle
-   upscaling, the Chatterbox voice, captions, the full horizontal video, the vertical Shorts series and the YouTube
-   notes. It ends with "FINAL render: ready to upload from Exports\MyVideo\Upload". An 8-minute video takes roughly an
-   hour to render (--check estimates it), plus Kaggle queueing.
+   upscaling, the channel's voice, captions, the channel's intro and outro, the full horizontal video, the vertical
+   Shorts series and the YouTube notes. It ends with "FINAL render: ready to upload from
+   Exports\smart_village_boy\MyVideo\Upload". An 8-minute video takes roughly an hour to render (--check estimates
+   it), plus Kaggle queueing.
+   Before it spends any neurons or Kaggle time it checks that everything it needs later is ready (FFmpeg, the keys for
+   the scenes that need pictures, the voice: the Kokoro model for a Kokoro channel, Remotion's packages) and stops
+   with a message saying what to fix. --visuals-only skips the voice and video checks.
+   If the render stops part-way (a crash, Ctrl+C, the PC sleeping), run the same command again: it picks up from the
+   last finished stage (voice, captions, prepared pictures, each video), as long as the script, pictures, settings,
+   the channel (its tagline, colours, branding clips, voice, captions, music, ...) and the code are the same. Change any
+   of them and the render starts over; --fresh starts the voice, captions and videos over too.
+   At the end, generated files in Upload\ that this render didn't make (an old Short part from a longer version, say)
+   are moved to Working\old_outputs\<date_time>\ and listed, so Upload\ holds only this render's files
+   (Working\manifest.json lists them). A vertical-only or horizontal-only render leaves the other format's video
+   alone, and a render with --no-metadata leaves the old youtube.md and thumbnail.
    If a scene's Cloudflare call still failed after a retry, or the daily cap was reached, those scenes used the
    Pollinations backup: the end of the run (and Working\log.txt) lists them with the exact command that redraws them
    with Cloudflare, like:
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --redo-scenes "15,16"
-7. Review the outputs. Each video has its own folder, named after the script (the run prints its Upload path):
-   Exports\MyVideo\Upload\      only what you upload to YouTube (only a final render writes here)
+7. Review the outputs. Each video has its own folder, Exports\<channel>\<script name>\ (the run prints its Upload
+   path):
+   Exports\smart_village_boy\MyVideo\Upload\      only what you upload to YouTube (only a final render writes here)
        MyVideo.mp4               1920x1080, the full video
        MyVideo_Short_Part1.mp4, MyVideo_Short_Part2.mp4, ...
                                  1080x1920 Shorts, each under 2:50: "Part 1 of N" at the start, "Watch Part 2" at
                                  the end (a script that fits in one Short gives a single MyVideo_Short.mp4)
        thumbnail.jpg             1280x720 thumbnail
        youtube.md                titles, descriptions, chapters, tags, hashtags; plus a section per Short
-   Exports\MyVideo\Working\     everything else
-       MyVideo.srt               captions for the full video
-       MyVideo_Short_PartN.srt   captions for each Short, timed for that part
+   Exports\smart_village_boy\MyVideo\Working\     everything else
+       MyVideo.srt               captions for the full video, timed after its intro
+       MyVideo_Short.srt         captions for a single Short, timed after the vertical intro
+       MyVideo_Short_PartN.srt   captions for each Short part, timed for that part and its intro
+       manifest.json             the files the last final render put in Upload\
+       old_outputs\              files an earlier render left in Upload\ that the latest one replaced
        prompts.json              the image prompts and character sheet (edit, then rerun)
        media.json                which scenes use stock, from where, and the creators to credit
        image_checks.json         the quality check's verdict for each image
        log.txt                   everything each run printed, including the backup scenes and warnings
        MyVideo_DRAFT.mp4         --draft;  preview.mp4: --preview-scenes
        thumbnail_ideas\          --thumbnail-ideas;  style_tests\: --style-test
-       kaggle\, render\          Kaggle job files and temporary render files
+       kaggle\, render\          Kaggle job files, and the render's temporary files and checkpoints (removed after a
+                                 successful final render unless --keep-work)
    Images, upscaled images, stock media and voice lines stay in the shared generated\ caches, so nothing is redrawn.
    Draft pictures have their own cache (generated\drafts\) that a final render never reads.
    Watch both videos. Look for extra fingers or limbs (the log lists images the check flagged), wrong people, a
@@ -197,7 +237,7 @@ Short example:
        a bad stock pick:     add "# media: ai" to that scene
        a wrong shot:         edit its # Visuals line (or its prompt in Working\prompts.json)
        a mispronounced word: spell it the way it's said in the narration
-9. Upload everything in Exports\MyVideo\Upload\, using youtube.md:
+9. Upload everything in Exports\smart_village_boy\MyVideo\Upload\, using youtube.md:
    - Pick one of the 3 titles; paste the description (it has the chapters, the AI/stock note and the stock credits)
      and the tags.
    - Upload thumbnail.jpg as the thumbnail.
@@ -213,26 +253,34 @@ Short example:
 All start with:  .venv\Scripts\python make_video.py Scripts\MyVideo.txt  ...
 
 Planning
-    --check                     Scene list, word counts, estimated length, flags, the Cloudflare neurons, their cost
+    --check                     Scene list, word counts, estimated length, flags, the channel, each intro and outro
+                                (your clip and its length, or the generated one), the Cloudflare neurons, their cost
                                 beyond the free 10,000, whether the run fits under the daily cap, Kaggle time and
                                 render time. Changes nothing, no network. Add any options you'll render with
                                 (e.g. --check --new-images, --check --draft) to see their cost.
-    --prompts-only              Write Exports\MyVideo\Working\prompts.json, then stop.
+    --prompts-only              Write Exports\smart_village_boy\MyVideo\Working\prompts.json, then stop.
     --visuals-only              Make and cache the prompts and images (checks, stock, upscaling), then stop before the
                                 voice and video. For a script that doesn't fit under the cap: once a day, then render.
 
 Rendering
-    (no options)                The FINAL render with your make_video.toml defaults, into Upload\.
+    (no options)                The FINAL render with your make_video.toml and channel settings, into Upload\.
+    --channel travel_diaries    Use that channel (channels\travel_diaries.toml) for this run, unless the script has a
+                                "# channel:" line. Its outputs go to Exports\travel_diaries\.
     --draft                     A quick DRAFT: Pollinations pictures (their own cache), one format (horizontal, or
                                 --format vertical), no upscaling, image checks, Shorts or YouTube notes, to
-                                Working\MyVideo_DRAFT.mp4 with a DRAFT label. Add --engine edge to skip Kaggle too.
+                                Working\MyVideo_DRAFT.mp4 with a DRAFT label. With a Chatterbox channel, add
+                                --engine kokoro or --engine edge to skip Kaggle too.
                                 draft-images = true in make_video.toml makes every run a draft (--no-draft for one final).
     --preview-scenes "1,6,8"    A draft of only those scenes, to Working\preview.mp4. Quick way to compare settings.
     --format vertical           Only the vertical Shorts (or horizontal; default both). Halves the image cost.
-    -o MyVideo_v2               A different folder and name (default: the script's name): Exports\MyVideo_v2\.
+    -o MyVideo_v2               A different folder and name (default: the script's name):
+                                Exports\smart_village_boy\MyVideo_v2\ (a full path is used as it is).
                                 NOTE: prompts are saved per folder, so a new -o writes new prompts (images are reused
                                 when the prompt is the same).
     --no-metadata               Skip the YouTube notes and thumbnail.
+    --fresh                     Ignore the checkpoints of an unfinished render: make the voice, captions and videos
+                                again (images and other caches are still reused).
+    --keep-work                 Keep Working\render\ (temporary files and checkpoints) after a successful render.
     --music "Raw Footage\song.mp3"   Background music, ducked under the voice.
 
 Images
@@ -253,7 +301,7 @@ Brainstorming (Pollinations only, no Cloudflare neurons; each stops before any v
                                 Upload\thumbnail.jpg.
     --style-test "watercolour | 3D animated film | photorealistic documentary photography"
                                 One scene drawn once in each style, into Working\style_tests\. Put the one you like in
-                                make_video.toml as style = "...".
+                                the channel's file as style = "...".
     --style-test-scene 5        Which scene --style-test draws (default: the first without a [visual:] file).
 
 Stock footage
@@ -263,11 +311,15 @@ Stock footage
     --media ai                  Never stock.
     --stock auto                Default: every provider with a key. Or --stock pixabay / --stock pexels.
 
-Voice
-    (default)                   Chatterbox "natural" on Kaggle. Each line is cached; falls back to Emma if Kaggle fails.
-    --engine edge               Emma (Edge voice), no Kaggle. Good for drafts.
-    --engine kokoro --voice am_michael   Offline voice (after download_models.py).
-    --rate +10%                 Faster (or -5% slower). Default +5%.
+Voice (each channel's voice is in channels\<channel>.toml; these change it for one run)
+    (default)                   The channel's voice. Smart Village Boy: Kokoro am_michael at +20%, offline.
+    --rate +15%                 Speed for every engine: Edge's own rate, Kokoro's speed (+15% = 1.15), a pitch-kept
+                                tempo change for Chatterbox. -5% is slower. Compare Kokoro speeds with the samples
+                                Exports\voice_samples\kokoro-am_michael-speed1.00.wav, 1.10, 1.15 and 1.20.
+    --engine kokoro --voice af_heart   Another offline Kokoro voice (after download_models.py).
+    --engine edge               Emma (Edge voice, online), or --voice with another Edge voice.
+    --engine chatterbox         Chatterbox "natural" on a free Kaggle GPU. Each line is cached; falls back to Emma if
+                                Kaggle fails.
     --chatterbox-emotion 0.35   0.25 flat ... 2.0 theatrical (default 0.5). Above ~0.7 also use --chatterbox-cfg 0.3.
     --chatterbox-voice voices\me.wav   Speak in a reference voice (6-15 s clean speech). ONLY a voice you have the
                                 right to use: your own, or with the speaker's written permission.
@@ -276,8 +328,8 @@ Captions and look
     --caption-style auto        Default: bold in the vertical video, clean in the horizontal.
     --caption-style bold        Big words popping in (or clean / minimal) for both videos.
     --no-captions               No captions.
-    --no-branding               No intro and outro.
-    --renderer ffmpeg           Fast plain render (no Remotion motion, map or intro).
+    --no-branding               No intro and outro (generated or your own clips).
+    --renderer ffmpeg           Fast plain render (no Remotion motion, map, intro or outro).
 
 Stills that feel alive (all on by default; each has a line in make_video.toml)
     --depth strong              2.5D parallax with a filled-in background (or subtle / off).
@@ -288,6 +340,10 @@ Stills that feel alive (all on by default; each has a line in make_video.toml)
                                 which about doubles the image neurons (--check shows it).
 
 Other tools
+    Channels (section 7):
+        .venv\Scripts\python channels.py list                          the channels and their own clips
+        .venv\Scripts\python channels.py new "Travel Diaries"          a new channel, its branding folder and templates
+        .venv\Scripts\python channels.py templates smart_village_boy   a channel's README.txt and *_TEMPLATE.mp4 again
     Chatterbox voice samples (one Kaggle run, ~2-3 min GPU), into Exports\voice_samples\:
         .venv\Scripts\python chatterbox_tts.py
         .venv\Scripts\python chatterbox_tts.py --text "Your own line." --voice voices\me.wav
@@ -295,8 +351,12 @@ Other tools
         or directly:  .venv\Scripts\python research.py "water storage village hacks" --max 15
     Fact-check (Claude Code skill): /fact-check Scripts\MyVideo.txt   -> Research\MyVideo_factcheck.md
     Tests:                          .venv\Scripts\python -m pytest -q
-    Code changes go to main through a GitHub pull request: GitHub Actions runs the same tests (and the Remotion type
-    check) on every PR; merge once the checks are green. The repository is public: your scripts, Exports\, Research\
+    Smoke render (about a minute, offline; needs FFmpeg and Node.js):
+        set SMOKE_RENDER=1
+        .venv\Scripts\python -m pytest -q tests\test_smoke_render.py
+    Code changes go to main through a GitHub pull request: GitHub Actions runs the same tests, the smoke render (a tiny
+    real video in both orientations with branding clips, captions and the Upload manifest, no keys or network) and the
+    Remotion type check on every PR; merge once the checks are green. The repository is public: your scripts, Exports\, Research\
     and .env are gitignored and stay on this PC.
 
 
@@ -333,7 +393,11 @@ When Cloudflare fails or the cap is reached in a final render:
     - Prompts Pollinations wrote are marked "stand_in" in prompts.json and are rewritten by Cloudflare next time.
     - Bad credentials (401/403) stop Cloudflare for the rest of the run with a WARNING (section 6).
 When Kaggle hours run out: the render carries on with the original images (WARNING: upscaling skipped ...), and
-    --engine edge (Emma) renders the voice without Kaggle.
+    --engine kokoro or --engine edge renders the voice without Kaggle.
+
+Branding clips: an intro of 2-4 s and an outro of 3-5 s are suggested; any clip of 1 s or more works, and --check
+    shows each one's length. Every Short gets the vertical intro and outro, so long clips leave less time for the
+    story in each part (Shorts stay under 2:50 including both).
 
 
 6. TROUBLESHOOTING
@@ -395,7 +459,8 @@ A real person (e.g. Sonam Wangchuk) doesn't look right
     then --redo-scenes "N". Real people are never drawn as their actual likeness.
 
 A stock clip doesn't match the scene
-    Add "# media: ai" to that paragraph and rerun. Exports\MyVideo\Working\media.json shows each pick and its score.
+    Add "# media: ai" to that paragraph and rerun. Exports\smart_village_boy\MyVideo\Working\media.json shows each
+    pick and its score.
 
 "The style changed ... every prompt is written again" in --check
     The style in make_video.toml or .env differs from the one the saved prompts were written for, or you used a new
@@ -406,6 +471,23 @@ Wrong or missing place label / map
 
 Edge voice fails (no internet)
     --engine kokoro --voice am_michael (offline, after download_models.py).
+
+"Offline voice model missing from models\"
+    The channel uses Kokoro: run .venv\Scripts\python download_models.py once (about 340 MB).
+
+'Channel "..." not found: there is no channels\....toml'
+    The script's "# channel:" line, --channel or default-channel names a channel without a settings file. Check the
+    spelling (the id is lower case with underscores, e.g. smart_village_boy; the name "Smart Village Boy" works too),
+    or make it: .venv\Scripts\python channels.py new "Name" (section 7).
+
+A channel's voice, style or other setting is ignored
+    In channels\<channel>.toml, every line after [colors] belongs to the colours table: keep [colors] at the end of
+    the file. A setting typed on the command line wins over the file.
+
+My intro or outro clip isn't used
+    --check lists each one. The file name must be exact (intro_horizontal.mp4, ...; see the folder's README.txt), in
+    channels\<channel>\branding\ of the channel the script uses, at least 1 s long and readable by FFmpeg. Files
+    ending in _TEMPLATE.mp4 are never used. The ffmpeg renderer and --no-branding have no intro or outro.
 
 research.py stops with "blocked"
     YouTube is limiting your IP. Rerun later; transcripts already saved are reused.
@@ -422,4 +504,69 @@ An error mentioning cv2 / OpenCV
     .venv\Scripts\python -m pip install -r requirements.txt   (OpenCV must stay below version 5).
 
 Anything else
-    Run --check first, and keep the log. Rerunning the same command is always safe: finished work is cached.
+    Run --check first, and keep the log. Rerunning the same command is always safe: finished work is cached, and an
+    unfinished final render resumes from its last finished stage (--fresh to start it over).
+
+"... needs POLLINATIONS_API_KEY" / "Cloudflare image generation needs ..." / "Offline voice model missing" at the start
+    The early checks found something a later step needs. Nothing was spent; fix what the message says and rerun.
+
+'Branding clip ...: the prepared clip has N frames, not the M the timeline needs'
+    FFmpeg couldn't make a clip of the right length from that file. Re-export it as MP4 (H.264, 30 fps) and rerun.
+
+"WARNING: N saved prompt(s) in prompts.json ... couldn't be matched to a scene with confidence"
+    Prompts saved before scene ids are matched to scenes by their scene number, narration and # Visuals line. Ones
+    that fit no scene (or more than one) are kept under "unmatched" in Working\prompts.json, never deleted: copy any
+    edit you want into its scene's "prompt" and rerun.
+
+"Resuming the last render" when you wanted a clean start
+    Add --fresh. A render resumes only when the script, pictures, settings and code are unchanged.
+
+
+7. CHANNELS AND BRANDING
+------------------------
+A channel is one settings file plus one branding folder:
+
+    channels\<channel>.toml              name, tagline, intro/outro colours, image style, voice, speed, caption style,
+                                         music, YouTube text style (and any other make_video option)
+    channels\<channel>\branding\         your own intro and outro clips, README.txt, and *_TEMPLATE.mp4 files to edit
+    Exports\<channel>\<script name>\    that channel's videos
+
+Make a new channel
+1. Create it (the id is the name in lower case: "Travel Diaries" -> travel_diaries):
+       .venv\Scripts\python channels.py new "Travel Diaries"
+   This writes channels\travel_diaries.toml, channels\travel_diaries\branding\README.txt and the generated intro and
+   outro as *_TEMPLATE.mp4 files there (needs Node.js; add --no-templates to skip them).
+2. Edit channels\travel_diaries.toml: tagline, style, engine / voice / rate, caption-style, music, youtube-style, and
+   the [colors] table (keep it LAST in the file). Listen to voices first (Exports\voice_samples\). Only use music
+   and reference voices you have the right to use.
+3. If you changed the name, tagline or colours, make the templates again:
+       .venv\Scripts\python channels.py templates travel_diaries
+4. Add a style section for it to SCRIPT_GUIDE.md (section 3), so its scripts are written in its voice.
+5. Start each of its scripts with "# channel: travel_diaries" (or pass --channel travel_diaries, or set
+   default-channel in make_video.toml), then check one:
+       .venv\Scripts\python make_video.py Scripts\MyTrip.txt --check
+   It shows "Channel: Travel Diaries (travel_diaries), to Exports\travel_diaries\MyTrip" and each intro and outro.
+
+Add your own intro and outro clips
+1. Open channels\<channel>\branding\README.txt: it lists every file name, size and suggested length.
+       intro_horizontal.mp4           1920x1080, 2-4 s   start of the full video
+       intro_vertical.mp4             1080x1920, 2-4 s   start of every Short
+       outro_horizontal.mp4           1920x1080, 3-5 s   end of the full video
+       outro_vertical.mp4             1080x1920, 3-5 s   end of a single Short, and of a series' last part
+       outro_next_part_vertical.mp4   1080x1920, 3-5 s   optional: end of every other part, instead of "Watch Part 2"
+2. Start from a template if you like: edit intro_horizontal_TEMPLATE.mp4 (and so on) in your video editor and export
+   it as MP4 (H.264), 30 fps, under the exact name without _TEMPLATE. Files ending in _TEMPLATE are never used.
+3. Put the clip in the branding folder. Each clip you add replaces the generated one; any that's missing stays
+   generated. Delete a clip to go back to the generated version.
+4. Run --check: it lists every intro and outro as "your clip ..., 3.0 s" or "generated ...", with a "!" when a clip
+   is outside the suggested length.
+How the clips are used
+   - Other sizes and frame rates are fine: the clip is resized and padded with black bars to fit (never stretched or
+     cropped) and converted to 30 fps.
+   - The last half second of an intro crossfades into the first scene, and an outro fades in over the last half
+     second of the story, so keep text clear of those moments.
+   - The clip's own sound is kept. When its sound runs longer than its picture, the last picture is held until the
+     sound ends (the clip's length is its longer part). Music (--music, or music in the channel's file) fades in after your intro, and
+     ducks under the voice and under your outro's sound. Keep clip sound around -16 LUFS, peaks under -1 dB.
+   - A Shorts series still shows "PART 1 OF 4" over your vertical intro.
+   - Only the Remotion renderer (the default) adds intros and outros; --no-branding leaves them all out.

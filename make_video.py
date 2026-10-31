@@ -1,6 +1,7 @@
 """Turn a text script into narrated videos with burned-in captions.
 
-Each video gets its own folder, Exports/<name>/ (<name> = the script's name, or -o; see outputs.py):
+Each video gets its own folder, Exports/<channel>/<name>/ (<name> = the script's name, or -o; see outputs.py), and its
+channel's look and sound from channels/<channel>.toml (channels.py):
   Upload/<name>.mp4                 1920x1080, the full video for YouTube
   Upload/<name>_Short_Part1.mp4 ...  1080x1920 Shorts: the script split into parts under 2:50 (shorts.py);
                                     a script that fits in one gives a single <name>_Short.mp4
@@ -25,6 +26,7 @@ Script format (plain .txt):
     (looked up in the "Raw Footage" folder, then next to the script).
   - "# character: Name = description" declares a character for consistent AI images.
   - "# media: ai" or "# media: stock" in a paragraph forces that scene's picture source (see --media).
+  - "# channel: <id>" at the top picks the channel profile (channels/<id>.toml; see channels.py).
   - Any other line starting with # is a comment: never spoken, captioned or used in prompts.
   Scenes without a visual reuse files from the footage folder in order,
   or fall back to a generated title card showing the scene text.
@@ -64,6 +66,7 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 FPS = 30
 PAUSE = 0.35  # seconds of silence after each scene's narration
 MUSIC_FADE = 2.0  # seconds of music fade-out at the end
+MUSIC_FADE_IN = 1.5  # seconds of music fade-in after a channel's own intro clip
 TTS_ATTEMPTS = 3
 FORMATS = {
     "horizontal": {"size": (1920, 1080), "font_size": 20, "margin": 40},
@@ -145,7 +148,7 @@ def parse_script(path):
 
 # "# HOOK", "# HACK 4 LADAKH, INDIA - Visuals: ...", "# OUTRO:": an all-caps section heading, used for YouTube chapters
 SECTION_LINE = re.compile(r"^#\s*([A-Z][A-Z0-9&'/, ]*?[A-Z0-9])\s*(?:$|[-–—:])")
-NOT_SECTIONS = {"NOTE", "TODO", "FIXME", "TIP"}
+NOT_SECTIONS = {"NOTE", "TODO", "FIXME", "TIP", "CHANNEL"}
 
 
 def parse_sections(path):
@@ -170,10 +173,11 @@ def parse_sections(path):
 
 
 def parse_comments(path):
-    """(line number, text) of every plain '#' comment the script skips: not character, description, media or
-    location lines."""
+    """(line number, text) of every plain '#' comment the script skips: not character, description, media, location
+    or channel lines."""
+    from channels import CHANNEL_LINE
     from places import LOCATION_LINE
-    used = (CHARACTER_LINE, DESCRIPTION_LINE, MEDIA_LINE, LOCATION_LINE)
+    used = (CHARACTER_LINE, DESCRIPTION_LINE, MEDIA_LINE, LOCATION_LINE, CHANNEL_LINE)
     return [(n, line.strip()) for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1)
             if line.strip().startswith("#") and not any(r.match(line.strip()) for r in used)]
 
@@ -268,9 +272,34 @@ def chatterbox_or_fallback(scenes, args):
     return lines
 
 
+def rate_speed(rate):
+    """--rate as a speed factor: "+15%" -> 1.15, "-5%" -> 0.95 (Kokoro's speed, and Chatterbox's tempo change)."""
+    try:
+        return 1 + float(str(rate).strip().rstrip("%")) / 100
+    except ValueError:
+        sys.exit(f'--rate: expected a percentage like "+15%" or "-5%", got "{rate}"')
+
+
+EDGE_VOICE, KOKORO_VOICE = "en-US-EmmaMultilingualNeural", "af_heart"  # when the channel's voice is another engine's
+
+
+def engine_voice(args):
+    """The voice for args.engine: the channel's voice when it belongs to that engine (Edge voices end in "Neural"), else
+    the engine's own default, so --engine edge works on a Kokoro channel and the other way round."""
+    voice, edge = args.voice, (args.voice or "").endswith("Neural")
+    if args.engine == "edge" and voice and not edge:
+        print(f"  {voice} isn't an Edge voice; using {EDGE_VOICE}")
+        return EDGE_VOICE
+    if args.engine == "kokoro" and edge:
+        print(f"  {voice} isn't a Kokoro voice; using {KOKORO_VOICE}")
+        return KOKORO_VOICE
+    return voice or ("en-US-AriaNeural" if args.engine == "edge" else KOKORO_VOICE)
+
+
 def narrate(scenes, work, args):
     made = chatterbox_or_fallback(scenes, args) if args.engine == "chatterbox" else None
-    speed = 1 + int(args.rate.rstrip("%")) / 100
+    speed = rate_speed(args.rate)
+    voice = None if made else engine_voice(args)
     for i, s in enumerate(scenes):
         raw = work / f"vo_{i:03}.{'mp3' if args.engine == 'edge' else 'wav'}"
         tempo = ""
@@ -278,9 +307,9 @@ def narrate(scenes, work, args):
             raw = made[i]
             tempo = f"atempo={min(2.0, max(0.5, speed)):.3f}," if abs(speed - 1) > 1e-3 else ""
         elif args.engine == "edge":
-            tts_edge(s["text"], raw, args.voice or "en-US-AriaNeural", args.rate)
+            tts_edge(s["text"], raw, voice, args.rate)
         else:
-            tts_kokoro(s["text"], raw, args.voice or "af_heart", speed)
+            tts_kokoro(s["text"], raw, voice, speed)
         wav = work / f"vo_{i:03}_pad.wav"
         run(["ffmpeg", "-y", "-i", raw, "-af", f"{tempo}apad=pad_dur={PAUSE}", "-ar", "48000", "-ac", "2", wav])
         s["dur"] = duration(wav)
@@ -569,13 +598,45 @@ def write_part_srts(chunks, scenes, parts, out, renderer, lead_in):
     return outs
 
 
-def background_filter(dur, music_volume=None, ambience_input=None, fade=MUSIC_FADE):
+def output_lead(args, fmt):
+    """Seconds before the narration starts in this format's videos: its intro with Remotion (the channel's own clip or
+    the generated one, less half the crossfade), nothing with the ffmpeg renderer."""
+    if getattr(args, "renderer", "remotion") != "remotion":
+        return 0.0
+    import remotion_render
+    return remotion_render.lead_seconds(args, fmt)
+
+
+def write_output_srts(chunks, scenes, parts, formats, out, args):
+    """An .srt for every output video, each on that video's own timeline after its own intro: Working/<name>.srt for
+    the full video, Working/<name>_Short.srt for a single Short, and Working/<name>_Short_PartN.srt for each part."""
+    def shifted(lead):
+        return [[Word(w.text, w.start + lead, w.end + lead) for w in c] for c in chunks]
+    outs = []
+    if "horizontal" in formats:
+        outs.append(write_srt(shifted(output_lead(args, "horizontal")), out.srt))
+    if "vertical" in formats:
+        lead = output_lead(args, "vertical")
+        if len(parts) > 1:
+            outs += write_part_srts(chunks, scenes, parts, out, args.renderer, lead)
+        else:
+            outs.append(write_srt(shifted(lead), out.short_srt()))
+    return outs
+
+
+def background_filter(dur, music_volume=None, ambience_input=None, fade=MUSIC_FADE, music_start=0.0):
     """Filter graph for the narration (input 1) with music (input 2, looped) and/or an ambience track (already placed
-    on the timeline) mixed under it -> [a]. Both beds are ducked whenever the voice speaks; the music fades out."""
+    on the timeline) mixed under it -> [a]. Both beds are ducked whenever the voice speaks; the music fades out.
+    music_start > 0: the music starts there with a fade-in (after a channel's own intro clip)."""
     beds = []
     if music_volume is not None:
-        beds.append(f"[2:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},volume={music_volume},"
-                    f"afade=t=out:st={max(dur - fade, 0):.3f}:d={fade}[m]")
+        start = min(max(music_start, 0.0), dur)
+        span = dur - start
+        fade_in = f"afade=t=in:st=0:d={MUSIC_FADE_IN}," if start else ""
+        ms = round(start * 1000)
+        delay = f",adelay={ms}|{ms}" if start else ""
+        beds.append(f"[2:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{span:.3f},volume={music_volume},"
+                    f"{fade_in}afade=t=out:st={max(span - fade, 0):.3f}:d={fade}{delay}[m]")
     if ambience_input is not None:
         beds.append(f"[{ambience_input}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{dur:.3f}[s]")
     labels = ("[m]" if music_volume is not None else "") + ("[s]" if ambience_input is not None else "")
@@ -585,9 +646,9 @@ def background_filter(dur, music_volume=None, ambience_input=None, fade=MUSIC_FA
             f"[vo][duck]amix=inputs=2:duration=first:normalize=0[a]")
 
 
-def mux(video, narration, args, out, cwd, filters=(), video_codec=None, ambience=None):
+def mux(video, narration, args, out, cwd, filters=(), video_codec=None, ambience=None, music_start=0.0):
     """Video + narration (+ ducked, faded music, + the ducked ambience track) -> out. Both renderers finish here, so
-    they sound the same."""
+    they sound the same. music_start: seconds before the music fades in (after a channel's own intro clip)."""
     inputs = ["-i", str(video), "-i", str(narration)]
     if args.music:
         inputs += ["-stream_loop", "-1", "-i", str(args.music)]
@@ -595,7 +656,7 @@ def mux(video, narration, args, out, cwd, filters=(), video_codec=None, ambience
         inputs += ["-i", str(ambience)]
     if args.music or ambience:
         graph = background_filter(duration(narration), args.music_volume if args.music else None,
-                                  (3 if args.music else 2) if ambience else None)
+                                  (3 if args.music else 2) if ambience else None, music_start=music_start)
         audio = ["-filter_complex", graph, "-map", "0:v", "-map", "[a]"]
     else:
         audio = ["-map", "0:v", "-map", "1:a"]
@@ -610,27 +671,54 @@ def mux(video, narration, args, out, cwd, filters=(), video_codec=None, ambience
 PATH_OPTIONS = {"font", "music", "output", "chatterbox_voice"}
 
 
-def load_config(ap):
-    """Defaults from make_video.toml ([defaults] table), then VIDEO_STYLE from .env or the environment.
-    Command-line options still win. Returns {option_dest: value}."""
-    import tomllib
+def option_defaults(ap, options, source):
+    """{option_dest: value} from a settings table (make_video.toml or a channel profile); unknown keys are noted."""
     known = {a.dest for a in ap._actions}
+    defaults = {}
+    for key, value in options.items():
+        dest = key.replace("-", "_")
+        if dest not in known or dest in ("script", "help", "channel"):
+            print(f"Note: {source}: unknown option '{key}' ignored")
+            continue
+        defaults[dest] = Path(value) if dest in PATH_OPTIONS else value
+    return defaults
+
+
+def load_config(ap):
+    """Defaults from make_video.toml ([defaults] table, and default-channel), then VIDEO_STYLE from .env or the
+    environment. The channel's profile and the command line still win. Returns {option_dest: value}."""
+    import tomllib
     defaults = {}
     if CONFIG_FILE.exists():
         try:
             data = tomllib.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as e:
             sys.exit(f"{CONFIG_FILE.name}: {e}")
-        for key, value in data.get("defaults", data).items():
-            dest = key.replace("-", "_")
-            if dest not in known or dest in ("script", "help"):
-                print(f"Note: {CONFIG_FILE.name}: unknown option '{key}' ignored")
-                continue
-            defaults[dest] = Path(value) if dest in PATH_OPTIONS else value
+        options = dict(data.get("defaults", data))
+        channel = (options.pop("default-channel", None) or options.pop("channel", None)
+                   or data.get("default-channel"))
+        defaults = option_defaults(ap, {k: v for k, v in options.items() if not isinstance(v, dict)}, CONFIG_FILE.name)
+        if channel:
+            defaults["channel"] = channel
     ai_visuals.load_env()
     if os.environ.get("VIDEO_STYLE", "").strip():
         defaults["style"] = os.environ["VIDEO_STYLE"].strip()
     return defaults
+
+
+def apply_channel(ap, argv, config):
+    """Parse the command line with the channel's profile layered between make_video.toml and the command line. The
+    channel is the script's '# channel:' line, else --channel, else default-channel. Sets args.channel_id,
+    args.channel (the display name, for the intro, outro and YouTube text), args.profile and args.branding."""
+    import channels
+    import remotion_render
+    args = ap.parse_args(argv)
+    profile = channels.load(channels.script_channel(args.script) or args.channel)
+    ap.set_defaults(**{**config, **option_defaults(ap, profile.options, profile.path.name)})
+    args = ap.parse_args(argv)
+    args.channel_id, args.channel, args.profile = profile.id, profile.name, profile
+    args.branding = channels.Branding(profile, {"intro": remotion_render.INTRO, "outro": remotion_render.OUTRO})
+    return args
 
 
 def parse_args(argv=None):
@@ -653,7 +741,9 @@ def parse_args(argv=None):
     ap.add_argument("--chatterbox-cfg", type=float, default=0.5,
                     help="chatterbox: lower (~0.3) keeps the pace natural at high emotion; default 0.5")
     ap.add_argument("--voice", help="edge default en-US-AriaNeural; kokoro default af_heart")
-    ap.add_argument("--rate", default="+0%", help="speaking rate, e.g. +10%% or -5%%")
+    ap.add_argument("--rate", default="+0%",
+                    help="speaking rate for every engine, e.g. +10%% or -5%%: Edge's own rate, Kokoro's speed "
+                         "(+15%% = 1.15), and a pitch-kept tempo change for Chatterbox")
     ap.add_argument("--music", type=Path, help="background music, ducked under the voice and faded out")
     ap.add_argument("--music-volume", type=float, default=0.2, help="music level between sentences")
     ap.add_argument("--font", type=Path, default=DEFAULT_FONT,
@@ -747,13 +837,21 @@ def parse_args(argv=None):
                          "and Upload/thumbnail.jpg after rendering")
     ap.add_argument("--metadata-model", default=ai_visuals.METADATA_MODEL,
                     help="Workers AI model that writes the YouTube titles, description and tags (~65 neurons)")
-    ap.add_argument("--channel", default="Smart Village Boy", help="channel name used in the YouTube metadata")
-    ap.add_argument("--keep-work", action="store_true", help="keep intermediate files")
+    ap.add_argument("--channel", default="smart_village_boy",
+                    help="the channel profile, channels/<id>.toml: its branding, image style, voice, speed, captions, "
+                         "music and YouTube text style, and outputs in Exports/<id>/. A '# channel: <id>' line in the "
+                         "script wins over this; default: default-channel in make_video.toml")
+    ap.add_argument("--keep-work", action="store_true",
+                    help="keep intermediate files (Working/render/, with the checkpoints) after a successful render")
+    ap.add_argument("--fresh", action="store_true",
+                    help="ignore the checkpoints of an unfinished render and start the voice, captions and videos over "
+                         "(images and other caches are still reused)")
     ap.add_argument("--check", action="store_true",
                     help="check the script and estimate length, Cloudflare neurons and their cost, the daily cap, "
                          "Kaggle time and render time, then stop (no audio, images or network)")
-    ap.set_defaults(**load_config(ap))
-    args = ap.parse_args(argv)
+    config = load_config(ap)
+    ap.set_defaults(**config)
+    args = apply_channel(ap, argv, config)
     if args.vertical:
         print("Note: --vertical is deprecated; use --format vertical.")
         args.format = "vertical"
@@ -806,7 +904,7 @@ def main():
     assign_visuals(scenes, script.parent, use_pool=not args.generate_visuals)
 
     import outputs
-    out = outputs.Outputs.for_script(args.output, script).make()
+    out = outputs.Outputs.for_script(args.output, script, args.channel_id).make()
     with outputs.Tee(out.log):
         if args.thumbnail_ideas or args.style_test:
             import brainstorm
@@ -866,6 +964,37 @@ def backup_report(providers, failed):
     print(f"  {redo_command(numbers)}")
 
 
+def preflight(args, draft, scenes=()):
+    """Before a run spends any neurons or Kaggle time: check that everything it needs later is ready, and stop with a
+    clear message if not. FFmpeg, the font and the music are checked in main(), and Remotion falls back to ffmpeg there
+    when Node.js is missing. --prompts-only and --visuals-only make no voice or video, so they skip those checks."""
+    check_ffmpeg()
+    # the image services' keys, when a scene needs a picture made: Cloudflare for a final render, Pollinations for a draft
+    if args.generate_visuals and any(not s.get("visual") for s in scenes):
+        if draft and not ai_visuals.pollinations_key():
+            sys.exit(f"Draft images (--draft, --preview-scenes) need POLLINATIONS_API_KEY in .env.\n"
+                     f"{ai_visuals.POLLINATIONS_SETUP}")
+        if not draft:
+            ai_visuals.credentials(required=True)
+    if args.prompts_only or args.visuals_only:
+        return
+    if args.engine == "kokoro":
+        check_kokoro_model()
+    elif args.engine == "edge":
+        try:
+            import edge_tts  # noqa: F401
+        except ImportError:
+            sys.exit("The Edge voice needs the edge-tts package: .venv\\Scripts\\python -m pip install -r requirements.txt")
+    elif args.engine == "chatterbox":
+        ai_visuals.load_env()
+        if not os.environ.get("KAGGLE_API_TOKEN", "").strip():
+            print("Note: no KAGGLE_API_TOKEN in .env, so the Chatterbox voice can't run; the whole video will use the Edge "
+                  "voice instead.")
+    if args.renderer == "remotion":
+        import remotion_render
+        remotion_render.ensure_installed()  # its packages, once (needs the internet the first time)
+
+
 def produce(args, script, scenes, font_path, out):
     """Visuals, voice, captions, the videos and the YouTube notes, into the video's folder (`out`: outputs.Outputs).
     A draft (--draft) or --preview-scenes renders one format with Pollinations images to Working/ (render_draft)."""
@@ -885,6 +1014,7 @@ def produce(args, script, scenes, font_path, out):
     elif draft:
         print(f"Draft render ({formats[0]}): Pollinations images, to {out.working}")
     picked = [scenes[i] for i in preview] if preview else scenes
+    preflight(args, draft, picked)
     failed_visuals = []
     providers = None
     if args.generate_visuals:
@@ -928,23 +1058,34 @@ def produce(args, script, scenes, font_path, out):
         for note in notes:
             print(f"WARNING: {note}")
         return
-    if args.engine == "kokoro":  # voice prerequisites only now: --visuals-only and --prompts-only never need them
-        check_kokoro_model()
     if draft:
         return render_draft(args, script, picked, font_path, out, formats[0], preview=bool(preview))
-    work = out.render
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
+    import checkpoints
+    work = out.render  # kept between runs: a render that fails part-way resumes from its last finished stage
+    done = checkpoints.Checkpoints(work, checkpoints.render_key(script, scenes, args), fresh=args.fresh)
     args.kaggle_work = out.kaggle("chatterbox")
 
-    print(f"{len(scenes)} scenes. Generating voice over ({args.engine})...")
-    narration = narrate(scenes, work, args)
+    narration = work / "narration.wav"
+    if (durs := done.get("narration")) and narration.exists() and len(durs) == len(scenes) and None not in durs:
+        for s, d in zip(scenes, durs):
+            s["dur"] = d
+        print(f"{len(scenes)} scenes. Voice over: from the last run")
+    else:
+        print(f"{len(scenes)} scenes. Generating voice over ({args.engine})...")
+        narration = narrate(scenes, work, args)
+        done.save("narration", [s.get("dur") for s in scenes])
 
     srt, chunks = None, None
     if not args.no_captions:
-        print(f"Transcribing captions (whisper {args.whisper_model})...")
-        srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
-                                    args.whisper_model, args.caption_words)
+        if (saved := done.get("captions")) is not None and (work / "captions.srt").exists():
+            srt, chunks = work / "captions.srt", [[Word(*w) for w in c] for c in saved]
+            print("Captions: from the last run")
+        else:
+            print(f"Transcribing captions (whisper {args.whisper_model})...")
+            srt, chunks = make_captions(narration, work / "captions.srt", " ".join(s["text"] for s in scenes),
+                                        args.whisper_model, args.caption_words)
+            if chunks is not None:
+                done.save("captions", [[list(w) for w in c] for c in chunks])
 
     import shorts
     parts = shorts.plan(scenes, script, args) if "vertical" in formats else []
@@ -956,16 +1097,22 @@ def produce(args, script, scenes, font_path, out):
     if args.renderer == "remotion":
         import remotion_render
         outs, lead_in, total = remotion_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
-                                                          out, script, parts)
+                                                          out, script, parts, checkpoints=done)
     else:
-        outs = [render_format(fmt, scenes, work, narration, srt, font_path, args, out.video(fmt)) for fmt in formats]
+        outs = []
+        for fmt in formats:
+            if done.get(f"render_{fmt}") and out.video(fmt).exists():
+                print(f"Rendering {fmt}: from the last run")
+                outs.append(out.video(fmt))
+                continue
+            shutil.rmtree(work / fmt, ignore_errors=True)
+            outs.append(render_format(fmt, scenes, work, narration, srt, font_path, args, out.video(fmt)))
+            done.save(f"render_{fmt}")
         if len(parts) > 1:  # the plain renderer has no intro or outro, so the parts are cut from the full video
             outs = [o for o in outs if o != out.video("vertical")] + cut_parts(out.video("vertical"), scenes, parts, out)
-    part_srts = []
-    if srt:  # the uploadable caption file, on the video's own timeline (after any intro)
-        shift_srt(srt, lead_in, out.srt)
-        if len(parts) > 1:  # every Short starts at 0:00 with its own intro, so each gets its own retimed captions
-            part_srts = write_part_srts(chunks, scenes, parts, out, args.renderer, lead_in)
+    srts = []
+    if srt:  # an uploadable caption file per video, each on that video's own timeline (after its own intro)
+        srts = write_output_srts(chunks, scenes, parts, formats, out, args)
 
     meta = None
     if not args.no_metadata:
@@ -979,19 +1126,25 @@ def produce(args, script, scenes, font_path, out):
 
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
+    moved = out.finish([*outs, *(meta or [])], {*formats, *(["notes"] if meta else [])})
     print("Done:")
     for video in outs:
         print(f"  {video} ({duration(video):.1f}s)")
     for path in meta or []:
         print(f"  {path}")
-    if srt:
-        print(f"  captions: {out.srt}" + (f" and {len(part_srts)} Short captions" if part_srts else ""))
+    for path in srts:
+        print(f"  captions: {path}")
     if failed_visuals:
         print(f"Image generation failed for scene(s) {', '.join(map(str, failed_visuals))}; "
               "they use title cards. Rerun later to retry (successful images are cached).")
     backup_report(providers, failed_visuals)
     for note in notes:
         print(f"WARNING: {note}")
+    if moved:
+        print(f"Moved {len(moved)} old file(s) this render didn't make out of Upload, to {moved[0].parent}:")
+        for path in moved:
+            print(f"  {path.name}")
+    print(f"Upload list: {out.manifest}")
     print(f"FINAL render: ready to upload from {out.upload}")
 
 

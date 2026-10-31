@@ -1,0 +1,34 @@
+# Smart Village Boy: everything that makes a video look and sound like this channel.
+# Any make_video option can go here too, written without the leading dashes. These settings win over
+# make_video.toml; options typed on the command line win over both.
+name = "Smart Village Boy"
+tagline = "Clever ideas from the world's villages"   # under the name in the generated intro
+
+# images
+style = "photorealistic documentary photography, natural lighting, realistic people and places, respectful depiction of local cultures"
+
+# voice
+engine = "kokoro"      # offline; "chatterbox" for Chatterbox on a free Kaggle GPU, "edge" for Microsoft voices online
+voice = "am_michael"   # the Kokoro voice (with engine = "edge": an Edge voice such as en-US-EmmaMultilingualNeural)
+rate = "+20%"          # speed for every engine: "+15%" = Kokoro speed 1.15
+chatterbox-emotion = 0.5   # with engine = "chatterbox": the "natural" sample, 0.25 flat ... 2.0 theatrical
+chatterbox-cfg = 0.5       # ~0.3 keeps the pace natural at high emotion
+# chatterbox-voice = "voices/my_voice.wav"   # optional reference clip: only a voice you have the right to use
+
+# captions: "auto" = bold for vertical, clean for horizontal; or "bold" / "clean" / "minimal" for both
+caption-style = "auto"
+
+# music: a file you have the right to use, ducked under the voice (none by default)
+# music = "Raw Footage/village_theme.mp3"
+music-volume = 0.2
+
+# how the YouTube titles and descriptions should sound (added to the writer's instructions)
+youtube-style = "warm, curious and respectful: celebrate the villagers' ingenuity and the place, never pity or hype"
+
+# the generated intro and outro's colours (your own clips in channels/smart_village_boy/branding/ replace them).
+# Keep this table last: in TOML every line after [colors] belongs to it.
+[colors]
+accent = "#FFD23F"            # the yellow T-shirt: the name's last word, the "Watch Part" card
+button = "#E63946"            # the red cap: the subscribe button and the "Part 1 of 4" badge
+background = "#0E2A3B"        # deep evening blue
+background-light = "#1C4A63"

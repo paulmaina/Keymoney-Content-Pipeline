@@ -154,8 +154,10 @@ def lead(text, min_chars, limit):
 
 
 def script_title(path):
-    """The script's first line, when it's a '# ...' title rather than a tag, label or heading."""
-    lines = path.read_text(encoding="utf-8-sig").strip().splitlines()
+    """The script's first line (after any '# channel:' line), when it's a '# ...' title rather than a tag, label or
+    heading."""
+    from channels import CHANNEL_LINE
+    lines = [x for x in path.read_text(encoding="utf-8-sig").strip().splitlines() if not CHANNEL_LINE.match(x.strip())]
     line = lines[0].strip() if lines else ""
     if not line.startswith("#") or mv.CHARACTER_LINE.match(line) or mv.DESCRIPTION_LINE.match(line):
         return ""
@@ -359,10 +361,14 @@ def thumb_text(options):
     return ""
 
 
-def messages(scenes, chaps, channel):
+def messages(scenes, chaps, channel, style=""):
+    """The writer's instructions and the video's chapters and narration. style: the channel's YouTube text style
+    (youtube-style in channels/<id>.toml), added to the instructions."""
     chapter_list = "\n".join(f"{timestamp(s)} {t}" for s, t in chaps) or "(none)"
     narration = shorten(" ".join(s["text"] for s in scenes), MAX_NARRATION)
-    return [{"role": "system", "content": SYSTEM.format(channel=channel)},
+    system = SYSTEM.format(channel=channel) + (f"\nThe channel's style for titles and descriptions: {style.strip()}. "
+                                               "The rules above still apply." if style.strip() else "")
+    return [{"role": "system", "content": system},
             {"role": "user", "content": f"Chapters:\n{chapter_list}\n\nNarration:\n{narration}"}]
 
 
@@ -557,7 +563,7 @@ def write(scenes, script, out, args, work, total, lead_in=0.0, parts=None):
     if creds:
         providers = ai_visuals.Providers("final", args.image_model, args.metadata_model, creds=creds, poll_key="",
                                          cap=getattr(args, "max_daily_neurons", ai_visuals.MAX_DAILY_NEURONS))
-        msgs = messages(scenes, chaps, channel)
+        msgs = messages(scenes, chaps, channel, youtube_style(args))
         cost = providers.model.neurons(*ai_visuals.dims(thumb_size(providers)))
         extra = "" if picture else f" + ~{cost:.0f} for a thumbnail image if not cached"
         print(f"YouTube metadata: one {args.metadata_model} call, ~{estimate(args.metadata_model, msgs):.0f} "
@@ -583,7 +589,7 @@ def write(scenes, script, out, args, work, total, lead_in=0.0, parts=None):
     if parts:
         import shorts
         text += shorts_markdown(out, [part_meta(scenes, script, sections, parts, k, channel, providers,
-                                                 shorts.branding_of(args))
+                                                 shorts.branding_of(args), youtube_style(args))
                                        for k in range(1, len(parts) + 1)], meta["titles"][0])
     md.write_text(text, encoding="utf-8")
     if providers:
@@ -593,7 +599,12 @@ def write(scenes, script, out, args, work, total, lead_in=0.0, parts=None):
 
 # ---------- the vertical Shorts series ----------
 
-def part_meta(scenes, script, sections, parts, k, channel, providers=None, branding=True):
+def youtube_style(args):
+    profile = getattr(args, "profile", None)
+    return profile.youtube_style if profile else ""
+
+
+def part_meta(scenes, script, sections, parts, k, channel, providers=None, branding=True, style=""):
     """Titles, description and tags for part k of the Shorts series: its own call to the text model (when Cloudflare
     is set up), checked against that part's narration only. No chapters; the description links to the full video."""
     import shorts
@@ -608,7 +619,7 @@ def part_meta(scenes, script, sections, parts, k, channel, providers=None, brand
     base = fallback(script, sub, part_chaps, channel)
     reply = {}
     if providers:
-        msgs = messages(sub, part_chaps, channel)
+        msgs = messages(sub, part_chaps, channel, style)
         print(f"  Short {k} of {n}: one {providers.text_model} call, ~{estimate(providers.text_model, msgs):.0f} neurons")
         reply = parse_reply(providers.text(msgs, max_tokens=META_TOKENS))
     meta = merge(reply, base, " ".join([channel, *(s["text"] for s in sub)]))
