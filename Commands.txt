@@ -104,7 +104,7 @@ and any of these lines can move to make_video.toml to apply to every channel tha
     Style                      photorealistic documentary photo...  style = "..."            --style "..."
     Voice engine               kokoro (offline)                     engine = "chatterbox"    --engine edge
     Voice                      am_michael                           voice = "..."            --voice af_heart
-    Speaking rate              +20% (Kokoro speed 1.2)              rate = "+15%"            --rate +15%
+    Speaking rate              +10% (Kokoro speed 1.1)              rate = "+15%"            --rate +15%
     Chatterbox emotion / cfg   0.5 / 0.5 (engine = "chatterbox")    chatterbox-emotion = ..  --chatterbox-emotion ..
     Chatterbox reference voice built-in voice                       chatterbox-voice = ".."  --chatterbox-voice ..
     Caption style              auto (bold vertical, clean horiz.)   caption-style = "bold"   --caption-style clean
@@ -312,7 +312,7 @@ Stock footage
     --stock auto                Default: every provider with a key. Or --stock pixabay / --stock pexels.
 
 Voice (each channel's voice is in channels\<channel>.toml; these change it for one run)
-    (default)                   The channel's voice. Smart Village Boy: Kokoro am_michael at +20%, offline.
+    (default)                   The channel's voice. Smart Village Boy: Kokoro am_michael at +10%, offline.
     --rate +15%                 Speed for every engine: Edge's own rate, Kokoro's speed (+15% = 1.15), a pitch-kept
                                 tempo change for Chatterbox. -5% is slower. Compare Kokoro speeds with the samples
                                 Exports\voice_samples\kokoro-am_michael-speed1.00.wav, 1.10, 1.15 and 1.20.

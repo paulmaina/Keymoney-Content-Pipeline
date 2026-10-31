@@ -209,8 +209,8 @@ The channel visits the world's villages for clever, low-cost ideas, presented wi
   Write "Smart Village Boy" in full in the Visuals line of every scene he appears in. He appears on screen; he doesn't
   narrate. The narrator is the channel ("we", "you").
 - **Chapters:** `# HOOK`, `# HACK 1 PLACE` to `# HACK 5 PLACE` (each with its country or region), then `# OUTRO`.
-- **Voice and pace:** Kokoro's am_michael at +20% speaks about 190 words a minute. With 2–3 short sentences per scene that
-  is about 7–9 scenes a minute, so an 8-minute video needs about 1,500 spoken words (60–70 scenes). `--check` uses the
+- **Voice and pace:** Kokoro's am_michael at +10% speaks about 175 words a minute. With 2–3 short sentences per scene that
+  is about 7–8 scenes a minute, so an 8-minute video needs about 1,350 spoken words (60–65 scenes). `--check` uses the
   channel's current voice and speed.
 - **Hook (scenes 1–2):**
   - Scene 1 opens on a vivid problem or a surprising fact in the first sentence, with no greeting before it.
@@ -253,8 +253,8 @@ ending and tone. Everything else in this guide applies unchanged.
 
 **Speed.** Each channel's voice speaks at its own pace (section 3), plus a short pause after every scene. The table is for a
 voice of about **150 words and 6–8 scenes a minute** with 2–3 short sentences per scene (Chatterbox at +5%, or Kokoro at
-about +0%). A faster voice needs more words for the same length: Smart Village Boy's voice at about 190 words a minute needs
-roughly a quarter more. (`--check` uses the channel's current voice and speed.)
+about +0%). A faster voice needs more words for the same length: Smart Village Boy's voice at about 175 words a minute needs
+roughly a sixth more. (`--check` uses the channel's current voice and speed.)
 
 | Video length (at ~150 words a minute) | Scenes | Spoken words |
 |---|---|---|
@@ -334,7 +334,7 @@ In the editor's project, the fact-check skill writes `Research/<script>_factchec
 
 This exact text is in `Scripts/TEMPLATE.txt` (a Smart Village Boy script) and passes `--check` with no flags or notes:
 - 55 scenes and about 1,220 words: about 8:09 with the intro and outro at ~150 words a minute (Chatterbox at +5%), or
-  about 6:45 with the channel's current voice (Kokoro at +20%)
+  about 7:20 with the channel's current voice (Kokoro at +10%)
 - 7 `[video]` scenes and 7 chapters
 - a vertical series of 3–4 Shorts (depending on the voice's speed), cut only at chapter headings
 - about 40,000–43,000 neurons with second shots (about $0.34–0.36 beyond the free 10,000, one day under the cap), or about

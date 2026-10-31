@@ -10,7 +10,7 @@ style = "photorealistic documentary photography, natural lighting, realistic peo
 # voice
 engine = "kokoro"      # offline; "chatterbox" for Chatterbox on a free Kaggle GPU, "edge" for Microsoft voices online
 voice = "am_michael"   # the Kokoro voice (with engine = "edge": an Edge voice such as en-US-EmmaMultilingualNeural)
-rate = "+20%"          # speed for every engine: "+15%" = Kokoro speed 1.15
+rate = "+10%"          # speed for every engine: "+15%" = Kokoro speed 1.15
 chatterbox-emotion = 0.5   # with engine = "chatterbox": the "natural" sample, 0.25 flat ... 2.0 theatrical
 chatterbox-cfg = 0.5       # ~0.3 keeps the pace natural at high emotion
 # chatterbox-voice = "voices/my_voice.wav"   # optional reference clip: only a voice you have the right to use
