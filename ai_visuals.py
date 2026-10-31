@@ -919,17 +919,26 @@ def assign_ids(scenes):
 def migrate_records(records, scenes):
     """Match prompt records saved before ids existed to the script's scenes (the full list, with ids from assign_ids)
     and give each its scene's id. A record matches the scene with its stored scene number when that scene has the same
-    narration; failing that, the one scene not yet matched with the same narration and visual description. Anything
-    else can't be matched with confidence and is returned in `unmatched`, never dropped. Every other field, including
-    the user's edited prompts, is kept as it is. Returns (records with ids, unmatched records)."""
+    narration and the same visual description (a record saved without a description only when its narration appears
+    once in the script, so a reordered repeat can't take another copy's place); failing that, the one scene not yet
+    matched with the same narration and visual description. A record is never given a scene whose description differs
+    from its own. Anything else can't be matched with confidence and is returned in `unmatched`, never dropped. Every
+    other field, including the user's edited prompts, is kept as it is. Returns (records with ids, unmatched records)."""
     records = [r for r in records if isinstance(r, dict)]
     old = [r for r in records if not r.get("id")]
     taken = {r["id"] for r in records if r.get("id")}
+    copies = {}
+    for s in scenes:
+        copies[s["text"]] = copies.get(s["text"], 0) + 1
     pending = []
-    for r in old:  # first by stored scene number and narration
+    for r in old:  # first by stored scene number, narration and description
         n = r.get("scene")
         s = scenes[n - 1] if isinstance(n, int) and 1 <= n <= len(scenes) else None
-        if s and s["text"] == r.get("narration") and s["id"] not in taken:
+        if r.get("description") is None:  # no saved description: the number is only trusted for a line said once
+            same = s is not None and copies.get(s["text"]) == 1
+        else:
+            same = s is not None and s.get("description", "") == r["description"]
+        if same and s["text"] == r.get("narration") and s["id"] not in taken:
             r["id"] = s["id"]
             taken.add(s["id"])
         else:

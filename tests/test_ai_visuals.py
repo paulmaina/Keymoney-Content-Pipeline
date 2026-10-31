@@ -715,11 +715,12 @@ def test_redo_and_check_options():
 
 def test_repeated_narration_keeps_a_prompt_and_edit_per_scene(api, tmp_path):
     prompts = tmp_path / "p.json"
-    # a file from before scene ids: the same line twice, the second with the user's edit
+    # a file from before scene ids (which always saved the description, here empty): the same line twice, the second
+    # with the user's edit
     prompts.write_text(json.dumps({"scenes": [
-        {"scene": 1, "narration": "Water is life.", "prompt": "a well at dawn"},
-        {"scene": 2, "narration": "Fog over hills.", "prompt": "misty hills"},
-        {"scene": 3, "narration": "Water is life.", "prompt": "MY EDIT: a river at dusk"},
+        {"scene": 1, "narration": "Water is life.", "description": "", "prompt": "a well at dawn"},
+        {"scene": 2, "narration": "Fog over hills.", "description": "", "prompt": "misty hills"},
+        {"scene": 3, "narration": "Water is life.", "description": "", "prompt": "MY EDIT: a river at dusk"},
     ]}), encoding="utf-8")
     sc = scenes("Water is life.", "Fog over hills.", "Water is life.")
     run(sc, prompts)
@@ -769,3 +770,40 @@ def test_records_that_cant_be_matched_are_kept_with_a_warning(api, tmp_path, cap
     run(sc, prompts)  # a later run keeps them, without warning again
     assert "with confidence" not in capsys.readouterr().out
     assert len(json.loads(prompts.read_text(encoding="utf-8"))["unmatched"]) == 2
+
+
+def test_reordered_repeats_keep_their_own_edited_prompts(api, tmp_path):
+    prompts = tmp_path / "p.json"
+    # before scene ids: the same line twice, told apart only by their Visuals lines, each prompt edited by hand
+    prompts.write_text(json.dumps({"scenes": [
+        {"scene": 1, "narration": "Water is life", "description": "well", "prompt": "MY EDIT: a stone well"},
+        {"scene": 2, "narration": "Water is life", "description": "river", "prompt": "MY EDIT: a wide river"},
+    ]}), encoding="utf-8")
+    sc = scenes("Water is life", "Water is life")  # swapped: the river scene now comes first
+    sc[0]["description"], sc[1]["description"] = "river", "well"
+    run(sc, prompts)
+    assert api.text_calls() == []  # nothing regenerated
+    assert [c["prompt"].split(",")[0] for c in api.image_calls()] == ["MY EDIT: a wide river", "MY EDIT: a stone well"]
+    saved = json.loads(prompts.read_text(encoding="utf-8"))
+    assert [(r["scene"], r["description"], r["prompt"], r["id"]) for r in saved["scenes"]] == [
+        (1, "river", "MY EDIT: a wide river", sc[0]["id"]), (2, "well", "MY EDIT: a stone well", sc[1]["id"])]
+    assert "unmatched" not in saved  # nothing dropped or left over
+
+
+def test_a_legacy_record_without_a_description_and_repeated_narration_is_unmatched(api, tmp_path, capsys):
+    prompts = tmp_path / "p.json"
+    prompts.write_text(json.dumps({"scenes": [
+        {"scene": 1, "narration": "Water is life", "prompt": "MY EDIT: which copy was this?"},
+    ]}), encoding="utf-8")
+    sc = scenes("Water is life", "Water is life")
+    sc[0]["description"], sc[1]["description"] = "river", "well"
+    run(sc, prompts)
+    assert "couldn't be matched to a scene with confidence" in capsys.readouterr().out
+    saved = json.loads(prompts.read_text(encoding="utf-8"))
+    assert [r["prompt"] for r in saved["unmatched"]] == ["MY EDIT: which copy was this?"]
+    assert "MY EDIT" not in json.dumps(saved["scenes"])  # not given to either copy
+    # said once in the script, the scene number is trusted even without a saved description
+    one = av.assign_ids(scenes("Water is life", "Fog over hills"))
+    one[0]["description"] = "river"
+    matched, unmatched = av.migrate_records([{"scene": 1, "narration": "Water is life", "prompt": "p"}], one)
+    assert [r["id"] for r in matched] == [one[0]["id"]] and unmatched == []
