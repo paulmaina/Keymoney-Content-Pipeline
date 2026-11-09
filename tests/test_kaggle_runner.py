@@ -186,6 +186,18 @@ def test_poll_prints_progress_every_minute_until_done(capsys):
     assert "queued" in out and "image 2/2: 1536x864 -> 3072x1728" in out and "complete" in out
 
 
+def test_poll_gives_up_when_queued_too_long():
+    cli = FakeCLI(statuses=["QUEUED"] * 30)
+    with pytest.raises(kr.KaggleError, match="queued for 15 min"):
+        kr.poll(cli, "k/v/1", interval=60, sleep=lambda s: None, clock=clock())
+
+
+def test_poll_keeps_waiting_once_running():
+    cli = FakeCLI(statuses=["QUEUED"] * 5 + ["RUNNING"] * 20 + ["COMPLETE"])
+    status, *_ = kr.poll(cli, "k/v/1", interval=60, sleep=lambda s: None, clock=clock())
+    assert status == "COMPLETE"
+
+
 def test_log_follower_keeps_latest_progress():
     lines = ["Images: 2 to upscale", "Loading RealESRGAN x2 weights...", "pip noise that isn't progress",
              "  image 1/2: 1536x864 -> 3072x1728 (x2) in 2.0s\r  image 2/2: 864x1536 -> 1728x3072 (x2) in 2.1s"]

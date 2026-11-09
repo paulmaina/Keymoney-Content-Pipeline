@@ -292,8 +292,9 @@ Images
     --max-daily-neurons 80000   This run's daily cap (default 60000; 0 = no cap). Set it for good in make_video.toml.
     --no-generate-visuals       No stock or AI images: Raw Footage\ files in order, else text cards.
     --image-model flux-2-klein-4b   The default. Others cost far more; see README "Image models".
-    (Upscaling has no switch: every final render sends new images to Kaggle once; if Kaggle fails or its hours are
-    used up, the render uses the original images and prints a WARNING.)
+    (Upscaling has no switch: every final render sends new images to Kaggle once; if Kaggle fails, its hours are
+    used up, or the run stays queued for 15 minutes with no free GPU, the render uses the original images and
+    prints a WARNING.)
 
 Brainstorming (Pollinations only, no Cloudflare neurons; each stops before any voice or video)
     --thumbnail-ideas 4         4 thumbnail options in Working\thumbnail_ideas\ (idea_1.jpg ...): the opening scene drawn
@@ -440,8 +441,10 @@ Cloudflare 401 / 403 ("WARNING: Cloudflare rejected the credentials")
     An old make_video.toml with upscale or image-provider lines only gets a "unknown option ... ignored" note.
 
 Kaggle run waits "queued" for a long time
-    Free GPUs can queue for several minutes. Ctrl+C stops WATCHING, not the run; rerun later and only the missing
-    work is sent.
+    Free GPUs can queue for several minutes. After 15 minutes still queued, the run stops waiting: upscaling renders
+    with the original images, and Chatterbox falls back to the Edge voice, each with a WARNING. Kaggle's CLI can't
+    cancel the queued run, so it may still start later and use a minute or two of GPU time. Ctrl+C stops WATCHING,
+    not the run; rerun later and only the missing work is sent.
 
 "Falling back to the Edge voice" in the log
     Chatterbox failed or a line was missing, so the whole video uses Emma (never two voices). Rerun to retry; the

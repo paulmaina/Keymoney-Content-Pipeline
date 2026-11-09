@@ -24,6 +24,7 @@ import ai_visuals
 
 ACCELERATOR = "NvidiaTeslaT4"  # GPU T4 x2
 POLL_SECONDS = 60
+QUEUE_LIMIT_SECONDS = 15 * 60  # give up when Kaggle has no free GPU this long; callers then fall back (originals, default voice)
 DONE = {"COMPLETE"}
 FAILED = {"ERROR", "CANCEL_REQUESTED", "CANCEL_ACKNOWLEDGED"}
 LOG_TAIL = 40
@@ -200,9 +201,10 @@ def log_lines(text):
     return [l for l in text.splitlines() if l.strip()]
 
 
-def poll(cli, kernel, interval=POLL_SECONDS, sleep=time.sleep, clock=time.monotonic):
+def poll(cli, kernel, interval=POLL_SECONDS, sleep=time.sleep, clock=time.monotonic, queue_limit=QUEUE_LIMIT_SECONDS):
     """Print status, elapsed time and the latest live log line every `interval` seconds until the run ends.
-    Returns (status, message, seconds)."""
+    Returns (status, message, seconds). Raises KaggleError when the run is still queued (no free GPU) after
+    `queue_limit` seconds; the queued run can't be cancelled from the CLI, so it may still run later."""
     start, last, follower = clock(), None, None
     try:
         while True:
@@ -211,6 +213,9 @@ def poll(cli, kernel, interval=POLL_SECONDS, sleep=time.sleep, clock=time.monoto
             if status in DONE | FAILED:
                 print(f"  [{elapsed / 60:5.1f} min] {status.lower()}{': ' + message if message else ''}")
                 return status, message, elapsed
+            if status == "QUEUED" and elapsed >= queue_limit:
+                raise KaggleError(f"Kaggle kept the run queued for {elapsed / 60:.0f} min with no free GPU, so this "
+                                  f"run stopped waiting (the queued run may still start later on Kaggle)")
             if status == "RUNNING" and (follower is None or not follower.alive()):
                 note_before = follower.latest if follower else ""
                 follower = cli.follow_logs(kernel)  # (re)attach; the server replays the log from the start

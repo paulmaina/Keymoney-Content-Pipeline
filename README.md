@@ -669,7 +669,8 @@ the sharper images are used in the render (and the thumbnail). Images are enlarg
   **Measured on Script2** (October 2026): 38 images at 1536x864, 2x on one T4, took **2.0 s each** and a **1.9-minute
   session** in all (about 0.6 min of install and model download), plus a few minutes queued and uploading. That's about 1% of a
   week's free GPU hours.
-- **If it fails** (no or a rejected token, Kaggle down, a timeout, the weekly GPU hours used up), the render never stops: it uses
+- **If it fails** (no or a rejected token, Kaggle down, a timeout, the weekly GPU hours used up, or the run still queued with
+  no free GPU after 15 minutes, `QUEUE_LIMIT_SECONDS` in `kaggle_runner.py`), the render never stops: it uses
   the original images and prints `WARNING: upscaling skipped: ...`, repeated at the end of the run. The next render retries; only
   the missing images are sent. Ctrl+C stops *watching*, not the run.
 - **Setup, once:** on Kaggle, go to **Settings > API Tokens > Generate New Token** and add `KAGGLE_API_TOKEN=...` to `.env`. This is the

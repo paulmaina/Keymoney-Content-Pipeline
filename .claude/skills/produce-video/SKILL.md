@@ -200,7 +200,8 @@ Always review prompts before spending on images:
   would still be under 2048 px.
 - Cached in `generated/upscaled/` by a hash of the source image, so each image is upscaled once; reruns skip Kaggle entirely.
 - It prints the GPU time from Kaggle's own log; report it to the user. `--check` estimates it beforehand.
-- It never stops the render: if Kaggle fails, the token is missing or rejected, or the weekly GPU hours are used up, it prints
+- It never stops the render: if Kaggle fails, the token is missing or rejected, the weekly GPU hours are used up, or the run
+  is still queued after 15 minutes (`kaggle_runner.QUEUE_LIMIT_SECONDS`; the queued run can't be cancelled and may start later), it prints
   `WARNING: upscaling skipped: ...` (repeated at the end of the run) and renders with the original images; the next render
   retries. Tell the user when that happened.
 - After editing `kaggle/upscale.py`, run `.venv\Scripts\python kaggle\build_notebook.py` (a test checks they match).
