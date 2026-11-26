@@ -81,7 +81,7 @@ but not a channel's. Every default, and how to change it (a line in the file sho
     YouTube notes model        llama-3.3-70b-instruct-fp8-fast      metadata-model = "..."   --metadata-model ...
     Second shots (over 6 s)    on                                   two-shots = false        --no-two-shots
     Formats                    both (video + Shorts)                format = "horizontal"    --format vertical
-    Renderer                   remotion                             renderer = "ffmpeg"      --renderer ffmpeg
+    Renderer                   remotion                             renderer = "ffmpeg"      --renderer hyperframes / ffmpeg
     Intro and outro            on                                   no-branding = true       --no-branding
     Captions                   on, whisper "base", 6 words a line   no-captions = true,      --no-captions,
                                                                     whisper-model, caption-words
@@ -160,9 +160,19 @@ Short example:
 
 3. THE NORMAL WORKFLOW
 ----------------------
-1. Research (optional), in Claude Code:   /research-topic water storage village hacks
-2. Write the script in Scripts\ (format above).
-3. Fact-check it, in Claude Code:          /fact-check Scripts\MyVideo.txt
+You can run the full end-to-end producer from a topic or a script with produce.py (or run make_video.py directly once a script exists):
+    .venv\Scripts\python produce.py run --topic "water storage village hacks" --research --fact-check
+    .venv\Scripts\python produce.py run Scripts\MyVideo.txt --renderer hyperframes
+
+Or step by step:
+1. Research (optional):
+       .venv\Scripts\python produce.py research "water storage village hacks" --max 15
+   (Or in Claude Code: /research-topic water storage village hacks)
+2. Write or generate the script in Scripts\ (format above):
+       .venv\Scripts\python produce.py script "water storage village hacks" --research-file Research\water-storage-village-hacks.md
+3. Fact-check it:
+       .venv\Scripts\python produce.py fact-check Scripts\MyVideo.txt
+   (Or in Claude Code: /fact-check Scripts\MyVideo.txt)
    Read Research\MyVideo_factcheck.md and soften anything not confirmed.
 4. Check it (free, no network):
        .venv\Scripts\python make_video.py Scripts\MyVideo.txt --check
@@ -330,7 +340,8 @@ Captions and look
     --caption-style bold        Big words popping in (or clean / minimal) for both videos.
     --no-captions               No captions.
     --no-branding               No intro and outro (generated or your own clips).
-    --renderer ffmpeg           Fast plain render (no Remotion motion, map, intro or outro).
+    --renderer hyperframes      HTML/GSAP compositions rendered via HyperFrames CLI (needs Node.js).
+    --renderer ffmpeg           Fast plain render (no Remotion/HyperFrames motion, map, intro or outro).
 
 Stills that feel alive (all on by default; each has a line in make_video.toml)
     --depth strong              2.5D parallax with a filled-in background (or subtle / off).
@@ -341,6 +352,11 @@ Stills that feel alive (all on by default; each has a line in make_video.toml)
                                 which about doubles the image neurons (--check shows it).
 
 Other tools
+    End-to-end producer CLI (video_producer\):
+        .venv\Scripts\python produce.py run --topic "Topic" --research --fact-check
+        .venv\Scripts\python produce.py script "Topic" --minutes 8
+        .venv\Scripts\python produce.py fact-check Scripts\MyVideo.txt
+        .venv\Scripts\python produce.py export-plan Scripts\MyVideo.txt -o plan.json
     Channels (section 7):
         .venv\Scripts\python channels.py list                          the channels and their own clips
         .venv\Scripts\python channels.py new "Travel Diaries"          a new channel, its branding folder and templates

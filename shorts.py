@@ -34,9 +34,9 @@ def part_seconds(durations, branding=True, fmt="vertical"):
 
 
 def branding_of(args):
-    """The channel's intro and outro with Remotion (its channels.Branding, or True for the generated ones), False for
-    Remotion without them, None for the ffmpeg renderer."""
-    if getattr(args, "renderer", "remotion") != "remotion":
+    """The channel's intro and outro with Remotion/HyperFrames (its channels.Branding, or True for the generated ones),
+    False without them, None for the ffmpeg renderer."""
+    if getattr(args, "renderer", "remotion") not in ("remotion", "hyperframes"):
         return None
     return False if getattr(args, "no_branding", False) else (getattr(args, "branding", None) or True)
 

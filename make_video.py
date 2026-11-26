@@ -599,12 +599,16 @@ def write_part_srts(chunks, scenes, parts, out, renderer, lead_in):
 
 
 def output_lead(args, fmt):
-    """Seconds before the narration starts in this format's videos: its intro with Remotion (the channel's own clip or
-    the generated one, less half the crossfade), nothing with the ffmpeg renderer."""
-    if getattr(args, "renderer", "remotion") != "remotion":
-        return 0.0
-    import remotion_render
-    return remotion_render.lead_seconds(args, fmt)
+    """Seconds before the narration starts in this format's videos: its intro with Remotion/HyperFrames,
+    nothing with the ffmpeg renderer."""
+    renderer = getattr(args, "renderer", "remotion")
+    if renderer == "remotion":
+        import remotion_render
+        return remotion_render.lead_seconds(args, fmt)
+    if renderer == "hyperframes":
+        from video_producer import hyperframes_render
+        return hyperframes_render.lead_seconds(args, fmt)
+    return 0.0
 
 
 def write_output_srts(chunks, scenes, parts, formats, out, args):
@@ -801,10 +805,11 @@ def parse_args(argv=None):
     ap.add_argument("--image-model", default=ai_visuals.IMAGE_MODEL,
                     help="Workers AI image model: a short name (" + ", ".join(ai_visuals.IMAGE_MODELS) +
                          ") or a full @cf/... ID (default flux-2-klein-4b, ~132 neurons an image, one per format)")
-    ap.add_argument("--renderer", choices=["remotion", "ffmpeg"], default="remotion",
+    ap.add_argument("--renderer", choices=["remotion", "hyperframes", "ffmpeg"], default="remotion",
                     help="remotion = eased pans and zooms, 2.5D parallax, crossfades, animated captions, place labels, "
-                         "a world map and a branded intro/outro (needs Node.js; slower); ffmpeg = simple zooms, fast. "
-                         "Falls back to ffmpeg when Node.js is missing")
+                         "a world map and a branded intro/outro (needs Node.js); hyperframes = HTML/GSAP compositions "
+                         "rendered via HyperFrames CLI (needs Node.js); ffmpeg = simple zooms, fast. "
+                         "Falls back when Node.js is missing")
     ap.add_argument("--no-branding", action="store_true", help="remotion: leave out the channel intro and outro")
     ap.add_argument("--depth", choices=["strong", "subtle", "off"], default="strong",
                     help="remotion 2.5D parallax on pictures with a clear foreground: strong (default: more separation, "
@@ -874,6 +879,23 @@ def parse_scene_numbers(text, ap=None):
         (ap.error if ap else sys.exit)(f'expected scene numbers like "3,7", got "{text}"')
 
 
+def resolve_renderer(choice):
+    """Verify requested renderer's runtime availability, falling back cleanly when Node.js is absent."""
+    if choice == "remotion":
+        import remotion_render
+        ok, why = remotion_render.available()
+        if not ok:
+            print(f"Note: the Remotion renderer isn't available ({why}); using --renderer ffmpeg.")
+            return "ffmpeg"
+    elif choice == "hyperframes":
+        from video_producer import hyperframes_render
+        ok, why = hyperframes_render.available()
+        if not ok:
+            print(f"Note: the HyperFrames renderer isn't available ({why}); using --renderer ffmpeg.")
+            return "ffmpeg"
+    return choice
+
+
 def main():
     args = parse_args()
     script = args.script.resolve()
@@ -891,12 +913,7 @@ def main():
         args.music = args.music.resolve()
         if not args.music.exists():
             sys.exit(f"Music file not found: {args.music}")
-    if args.renderer == "remotion":
-        import remotion_render
-        ok, why = remotion_render.available()
-        if not ok:
-            print(f"Note: the Remotion renderer isn't available ({why}); using --renderer ffmpeg.")
-            args.renderer = "ffmpeg"
+    args.renderer = resolve_renderer(args.renderer)
 
     scenes = parse_script(script)
     if not scenes:
@@ -993,6 +1010,11 @@ def preflight(args, draft, scenes=()):
     if args.renderer == "remotion":
         import remotion_render
         remotion_render.ensure_installed()  # its packages, once (needs the internet the first time)
+    elif args.renderer == "hyperframes":
+        from video_producer import hyperframes_render
+        ok, why = hyperframes_render.available()
+        if not ok:
+            sys.exit(f"HyperFrames renderer isn't available ({why}).")
 
 
 def produce(args, script, scenes, font_path, out):
@@ -1098,6 +1120,10 @@ def produce(args, script, scenes, font_path, out):
         import remotion_render
         outs, lead_in, total = remotion_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
                                                           out, script, parts, checkpoints=done)
+    elif args.renderer == "hyperframes":
+        from video_producer import hyperframes_render
+        outs, lead_in, total = hyperframes_render.render_all(scenes, work, narration, chunks, font_path, args, formats,
+                                                             out, script, parts, checkpoints=done)
     else:
         outs = []
         for fmt in formats:
@@ -1185,6 +1211,9 @@ def render_draft(args, script, scenes, font_path, out, fmt, preview=False):
     if args.renderer == "remotion":
         import remotion_render
         remotion_render.render_all(scenes, work, narration, chunks, font_path, args, [fmt], target, script, [])
+    elif args.renderer == "hyperframes":
+        from video_producer import hyperframes_render
+        hyperframes_render.render_all(scenes, work, narration, chunks, font_path, args, [fmt], target, script, [])
     else:
         render_format(fmt, scenes, work, narration, srt, font_path, args, target.video(fmt))
     stamp_draft(target.video(fmt), font_path)

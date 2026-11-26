@@ -37,7 +37,14 @@ follow. Pollinations only makes drafts, brainstorms, and stands in for a scene C
 The voice over and captions are generated once and shared by both videos. By default the videos are rendered with
 [Remotion](#motion-with-remotion-default): eased pans and zooms with a subtle 2.5D parallax, crossfades, animated captions,
 place labels, a world map with a pin for each new country, and the channel's intro and outro (generated, or your own clips).
-Everything runs locally and free.
+You can also pass `--renderer hyperframes` to render HTML/GSAP compositions via the HyperFrames CLI, or `--renderer ffmpeg`
+for fast plain FFmpeg rendering.
+
+For an end-to-end flow starting from a topic (`research` → `script` → `fact-check` → `check` → `render`), use `produce.py`:
+```
+.venv\Scripts\python produce.py run --topic "Five village cooling hacks" --research --fact-check
+.venv\Scripts\python produce.py run Scripts\my_video.txt --renderer hyperframes
+```
 
 ## Setup
 1. Install **FFmpeg** and make sure `ffmpeg` and `ffprobe` are on your PATH
@@ -207,6 +214,7 @@ style section in SCRIPT_GUIDE.md too.
 | Option | What it does |
 |---|---|
 | `--format horizontal` / `vertical` / `both` | Which videos to render (default `both`) |
+| `--renderer hyperframes` | HTML/GSAP compositions rendered with the HyperFrames CLI (needs Node.js; supports branding, captions, place badges and Shorts) |
 | `--renderer ffmpeg` | Plain FFmpeg rendering: one slow zoom per image, burned-in captions, no intro. Much faster (default `remotion`) |
 | `--no-branding` | Remotion: leave out the channel intro and outro |
 | `--depth strong` | Remotion 2.5D parallax: `strong` (default), `subtle` or `off` (`--no-parallax` is the same as `off`); see [Stills that feel alive](#stills-that-feel-alive) |

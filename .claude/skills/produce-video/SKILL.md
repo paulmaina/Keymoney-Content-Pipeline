@@ -5,8 +5,8 @@ description: Turn a script in Scripts/ into finished narrated, captioned horizon
 
 # Produce a video from a script
 
-The pipeline is `make_video.py` in the project root (see README.md for every option). `Commands.txt` is the user's plain-text
-runbook (setup, script format, workflow, every command, limits, troubleshooting).
+The end-to-end pipeline is `produce.py` (backed by `video_producer/` and `make_video.py` in the project root; see README.md for every option). `Commands.txt` is the user's plain-text runbook (setup, script format, workflow, every command, limits, troubleshooting).
+Use `produce.py run --topic "..." --research --fact-check` to go from topic to finished videos, or `produce.py run Scripts/<file>.txt` / `make_video.py Scripts/<file>.txt` directly. Both support `--renderer remotion` (default), `--renderer hyperframes` (HTML/GSAP via HyperFrames CLI), and `--renderer ffmpeg`.
 
 **Keep Commands.txt in step:** whenever you add, remove or rename an option, change a default in `make_video.toml` or a
 channel's file, or change the workflow, setup, limits or a common error's fix, update `Commands.txt` in the same change (as well

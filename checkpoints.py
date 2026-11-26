@@ -40,9 +40,9 @@ def digest(path):
 
 
 def code_version():
-    """A hash of the editor's own code: the Python modules and the Remotion project's sources."""
+    """A hash of the editor's own code: the Python modules, video_producer package, and Remotion sources."""
     h = hashlib.sha256()
-    for p in sorted([*ROOT.glob("*.py"), *(ROOT / "remotion" / "src").glob("*")]):
+    for p in sorted([*ROOT.glob("*.py"), *(ROOT / "video_producer").glob("*.py"), *(ROOT / "remotion" / "src").glob("*")]):
         if p.is_file():
             h.update(p.name.encode())
             h.update(p.read_bytes())
